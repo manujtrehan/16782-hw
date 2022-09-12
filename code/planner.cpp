@@ -5,6 +5,10 @@
  *=================================================================*/
 #include <math.h>
 #include <mex.h>
+#include <unordered_map>
+#include <unordered_set>
+#include <queue>
+#include <stack>
 
 /* Input Arguments */
 #define	MAP_IN                  prhs[0]
@@ -31,6 +35,111 @@
 #endif
 
 #define NUMOFDIRS 8
+
+struct node
+{
+    int mapIndex;
+    int g;
+    int h;
+    int f;
+    node* parent;
+
+    node() : parent(nullptr), g(INT_MAX) {}
+    node(int ind, int hVal) : parent(nullptr), g(INT_MAX)
+    {
+        mapIndex = ind;
+        h = hVal;
+    }
+};
+
+static auto compare = [](node* n1, node* n2)
+{
+    return n1->f > n2->f;
+};
+
+// Globals
+bool firstCall = true;
+std::unordered_map<int, node*> nodes;
+std::unordered_set<int> closed;
+
+std::priority_queue<node*, std::vector<node*>, decltype(compare)> openQueue(compare);
+std::stack<int> actionStack;
+
+int prevX, prevY;
+
+static void computePath(
+        int goalposeX,
+        int goalposeY,
+        int x_size,
+        int y_size,
+        int dX[],
+        int dY[],
+        double* map,
+        int collision_thresh,
+        std::unordered_map<int, node*> &nodes,
+        std::unordered_set<int> &closed,
+        std::priority_queue<node*, std::vector<node*>, decltype(compare)> &openQueue,
+        std::stack<int> &actionStack
+        )
+{
+    int goalIndex = GETMAPINDEX(goalposeX, goalposeY, x_size, y_size);
+    while(closed.find(goalIndex) == closed.end() and !openQueue.empty())
+    {
+        node* s = openQueue.top();
+        openQueue.pop();
+        closed.insert(s->mapIndex);
+
+        int rX = (int)(s->mapIndex % x_size) + 1;
+        int rY = (int)(s->mapIndex / x_size) + 1;
+
+        // actionStack.push(s->mapIndex);
+        // return;
+        // mexPrintf("%d \n", openQueue.size());
+        if(s->mapIndex == goalIndex)
+        {
+            // goal reached, add all to action stack and return
+            while(s)
+            {
+                actionStack.push(s->mapIndex);
+                // return;
+                s = s->parent;
+            }
+            actionStack.pop(); // remove start node
+            return;
+        }
+
+        for(int dir = 0; dir < NUMOFDIRS; ++dir)
+        {
+            int newx = rX + dX[dir];
+            int newy = rY + dY[dir];
+            int newIndex = (int) GETMAPINDEX(newx, newy, x_size, y_size);
+
+            if(newx >= 1 and newx <= x_size and newy >= 1 and newy <= y_size and closed.find(newIndex) == closed.end())
+            {
+                int cost = (int) map[newIndex];
+                if((cost >= 0) and (cost < collision_thresh)) // cell is free
+                {
+                    if(nodes.find(newIndex) == nodes.end()) // create a new node, if it does not exist
+                    {
+                        // mexPrintf("a \n");
+                        int h = (int) floor(sqrt(pow(newx - goalposeX, 2) + pow(newy - goalposeY, 2)));
+                        node* n = new node(newIndex, h);
+                        nodes[newIndex] = n;
+                    }
+                    // mexPrintf("%d %d %d \n", nodes[newIndex]->g, s->g, cost);
+                    if(nodes[newIndex]->g > s->g + cost) // compare g values and cost, update parent if needed
+                    {
+                        // mexPrintf("b \n");
+                        nodes[newIndex]->g = s->g + cost;
+                        nodes[newIndex]->f = nodes[newIndex]->g + nodes[newIndex]->h;
+                        nodes[newIndex]->parent = s;
+                        openQueue.push(nodes[newIndex]);
+                    }
+                }
+            }
+        }
+    }
+}
 
 static void planner(
         double*	map,
@@ -59,32 +168,72 @@ static void planner(
     // printf("robot: %d %d;\n", robotposeX, robotposeY);
     // printf("goal: %d %d;\n", goalposeX, goalposeY);
 
-    int bestX = 0, bestY = 0; // robot will not move if greedy action leads to collision
-    double olddisttotarget = (double)sqrt(((robotposeX-goalposeX)*(robotposeX-goalposeX) + (robotposeY-goalposeY)*(robotposeY-goalposeY)));
-    double disttotarget;
-    for(int dir = 0; dir < NUMOFDIRS; dir++)
-    {
-        int newx = robotposeX + dX[dir];
-        int newy = robotposeY + dY[dir];
 
-        if (newx >= 1 && newx <= x_size && newy >= 1 && newy <= y_size)
-        {
-            if (((int)map[GETMAPINDEX(newx,newy,x_size,y_size)] >= 0) && ((int)map[GETMAPINDEX(newx,newy,x_size,y_size)] < collision_thresh))  //if free
-            {
-                disttotarget = (double)sqrt(((newx-goalposeX)*(newx-goalposeX) + (newy-goalposeY)*(newy-goalposeY)));
-                if(disttotarget < olddisttotarget)
-                {
-                    olddisttotarget = disttotarget;
-                    bestX = dX[dir];
-                    bestY = dY[dir];
-                }
-            }
-        }
+    // Start
+
+    // static bool firstCall = true;
+    // static std::unordered_map<int, node*> nodes;
+    // static std::unordered_set<int> closed;
+
+    // static std::priority_queue<node*, std::vector<node*>, decltype(compare)> openQueue(compare);
+    // static std::stack<int> actionStack;
+
+    prevX = robotposeX;
+    prevY = robotposeY;
+
+    if(firstCall) // init s_start, g(start) = 0, add to the open set, and node map
+    {
+        firstCall = false;
+        int h = (int) floor(sqrt(pow(robotposeX-goalposeX, 2) + pow(robotposeY-goalposeY, 2)));
+        int index = GETMAPINDEX(robotposeX, robotposeY, x_size, y_size);
+        node* a = new node(index, h);
+        a->g = 0;
+        a->f = a->g + a->h;
+        nodes[index] = a;
+        openQueue.push(a);
+        // call compute path
+        computePath(goalposeX, goalposeY, x_size, y_size, dX, dY, map, collision_thresh, nodes, closed, openQueue, actionStack);
     }
-    robotposeX = robotposeX + bestX;
-    robotposeY = robotposeY + bestY;
-    action_ptr[0] = robotposeX;
-    action_ptr[1] = robotposeY;
+    if(!actionStack.empty())
+    {
+        int nextIndex = actionStack.top();
+        actionStack.pop();
+        prevX = (nextIndex % x_size) + 1;
+        prevY = (nextIndex / x_size) + 1;
+    }
+
+    action_ptr[0] = prevX;
+    action_ptr[1] = prevY;
+
+    // End
+
+
+    // int bestX = 0, bestY = 0; // robot will not move if greedy action leads to collision
+    // double olddisttotarget = (double)sqrt(((robotposeX-goalposeX)*(robotposeX-goalposeX) + (robotposeY-goalposeY)*(robotposeY-goalposeY)));
+    // double disttotarget;
+    // for(int dir = 0; dir < NUMOFDIRS; dir++)
+    // {
+    //     int newx = robotposeX + dX[dir];
+    //     int newy = robotposeY + dY[dir];
+
+    //     if (newx >= 1 && newx <= x_size && newy >= 1 && newy <= y_size)
+    //     {
+    //         if (((int)map[GETMAPINDEX(newx,newy,x_size,y_size)] >= 0) && ((int)map[GETMAPINDEX(newx,newy,x_size,y_size)] < collision_thresh))  //if free
+    //         {
+    //             disttotarget = (double)sqrt(((newx-goalposeX)*(newx-goalposeX) + (newy-goalposeY)*(newy-goalposeY)));
+    //             if(disttotarget < olddisttotarget)
+    //             {
+    //                 olddisttotarget = disttotarget;
+    //                 bestX = dX[dir];
+    //                 bestY = dY[dir];
+    //             }
+    //         }
+    //     }
+    // }
+    // robotposeX = robotposeX + bestX;
+    // robotposeY = robotposeY + bestY;
+    // action_ptr[0] = robotposeX;
+    // action_ptr[1] = robotposeY;
     
     return;
 }
