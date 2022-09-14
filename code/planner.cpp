@@ -101,7 +101,6 @@ static void computePath(
             while(s)
             {
                 actionStack.push(s->mapIndex);
-                // return;
                 s = s->parent;
             }
             actionStack.pop(); // remove start node
@@ -122,7 +121,8 @@ static void computePath(
                     if(nodes.find(newIndex) == nodes.end()) // create a new node, if it does not exist
                     {
                         // mexPrintf("a \n");
-                        int h = (int) floor(sqrt(pow(newx - goalposeX, 2) + pow(newy - goalposeY, 2)));
+                        // int h = (int) floor(sqrt(pow(newx - goalposeX, 2) + pow(newy - goalposeY, 2)));
+                        int h = (int) MAX(abs(newx - goalposeX), abs(newy - goalposeY));
                         node* n = new node(newIndex, h);
                         nodes[newIndex] = n;
                     }
@@ -184,7 +184,8 @@ static void planner(
     if(firstCall) // init s_start, g(start) = 0, add to the open set, and node map
     {
         firstCall = false;
-        int h = (int) floor(sqrt(pow(robotposeX-goalposeX, 2) + pow(robotposeY-goalposeY, 2)));
+        // int h = (int) floor(sqrt(pow(robotposeX-goalposeX, 2) + pow(robotposeY-goalposeY, 2)));
+        int h = (int) MAX(abs(robotposeX-goalposeX), abs(robotposeY-goalposeY));
         int index = GETMAPINDEX(robotposeX, robotposeY, x_size, y_size);
         node* a = new node(index, h);
         a->g = 0;
