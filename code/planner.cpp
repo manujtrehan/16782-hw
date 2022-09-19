@@ -10,6 +10,8 @@
 #include <queue>
 #include <stack>
 #include <memory>
+#include <algorithm>
+#include <vector>
 
 /* Input Arguments */
 #define	MAP_IN                  prhs[0]
@@ -46,8 +48,8 @@ struct node
     int time;
     std::shared_ptr<node> parent;
 
-    node() : parent(nullptr), g(INT_MAX), time(0) {}
-    node(int ind, int hVal, int t) : parent(nullptr), g(INT_MAX)
+    node() : parent(nullptr), g(INT_MAX), f(INT_MAX) {}
+    node(int ind, int hVal, int t) : parent(nullptr), g(INT_MAX), f(INT_MAX)
     {
         mapIndex = ind;
         h = hVal;
@@ -55,17 +57,24 @@ struct node
     }
 };
 
-static auto compare = [](std::shared_ptr<node> n1, std::shared_ptr<node> n2)
+bool nodeCompare(const std::shared_ptr<node> n1, const std::shared_ptr<node> n2)
 {
-    return n1->f > n2->f;
+    // return n1->f > n2->f;
+    return n1->f < n2->f;
 };
+
+// static auto compare = [](std::shared_ptr<node> n1, std::shared_ptr<node> n2)
+// {
+//     return n1->f > n2->f;
+// };
 
 // Globals
 bool firstCall = true;
 std::unordered_map<int, std::shared_ptr<node> > nodes;
 std::unordered_map<int, int> goals, heuristics;
 std::unordered_set<int> closed;
-std::priority_queue<std::shared_ptr<node>, std::vector<std::shared_ptr<node> >, decltype(compare)> openQueue(compare);
+// std::priority_queue<std::shared_ptr<node>, std::vector<std::shared_ptr<node> >, decltype(compare)> openQueue(compare);
+std::vector<std::shared_ptr<node> > openQueue;
 std::stack<int> actionStack;
 
 int prevX, prevY;
@@ -79,13 +88,14 @@ static void computeHeuristics(
         int collision_thresh,
         std::unordered_map<int, std::shared_ptr<node> > &nodes,
         std::unordered_map<int, int> &heuristics,
-        std::priority_queue<std::shared_ptr<node>, std::vector<std::shared_ptr<node> >, decltype(compare)> &openQueue
+        // std::priority_queue<std::shared_ptr<node>, std::vector<std::shared_ptr<node> >, decltype(compare)> &openQueue
+        std::vector<std::shared_ptr<node> > &openQueue
         )
 {
     while(!openQueue.empty())
     {
-        std::shared_ptr<node> s = openQueue.top();
-        openQueue.pop();
+        std::shared_ptr<node> s = openQueue[0];
+        openQueue.erase(openQueue.begin());
         heuristics[s->mapIndex] = s->g; // closed list. stores optimal g-vals
 
         int rX = (int)(s->mapIndex % x_size) + 1;
@@ -105,16 +115,19 @@ static void computeHeuristics(
                     if(nodes.find(newIndex) == nodes.end()) // create a new node, if it does not exist
                     {
                         // int h = (int) MAX(abs(newx - goalposeX), abs(newy - goalposeY));
-                        std::shared_ptr<node> n(new node(newIndex, 0, 0));
+                        std::shared_ptr<node> n = std::make_shared<node>(newIndex, 0, 0);
                         // node* n = new node(newIndex, h);
                         nodes[newIndex] = n;
+                        openQueue.push_back(n);
                     }
                     if(nodes[newIndex]->g > s->g + cost) // compare g values and cost, update parent if needed
                     {
-                        nodes[newIndex]->g = s->g + cost;
-                        nodes[newIndex]->f = nodes[newIndex]->g + nodes[newIndex]->h;
-                        nodes[newIndex]->parent = s;
-                        openQueue.push(nodes[newIndex]);
+                        std::shared_ptr<node> t = nodes[newIndex];
+                        openQueue.erase(std::find_if(openQueue.begin(), openQueue.end(), [t] (const std::shared_ptr<node>& d) { return d->mapIndex == t->mapIndex; }));
+                        t->g = s->g + cost;
+                        t->f = t->g + t->h;
+                        t->parent = s;
+                        openQueue.insert(std::upper_bound(openQueue.begin(), openQueue.end(), t, nodeCompare), t);
                     }
                 }
             }
@@ -135,7 +148,8 @@ static void computePath(
         std::unordered_map<int, int> &heuristics,
         std::unordered_map<int, std::shared_ptr<node> > &nodes,
         std::unordered_set<int> &closed,
-        std::priority_queue<std::shared_ptr<node>, std::vector<std::shared_ptr<node> >, decltype(compare)> &openQueue,
+        // std::priority_queue<std::shared_ptr<node>, std::vector<std::shared_ptr<node> >, decltype(compare)> &openQueue,
+        std::vector<std::shared_ptr<node> > &openQueue,
         std::stack<int> &actionStack
         )
 {
@@ -145,9 +159,9 @@ static void computePath(
     while(!openQueue.empty())
     {
         int newx, newy, newIndex, digits, newIndexForMap, cost;
-        std::shared_ptr<node> s = openQueue.top();
-        openQueue.pop();
-        digits = (int)(std::log10(s->time) + 1);
+        std::shared_ptr<node> s = openQueue[0];
+        openQueue.erase(openQueue.begin());
+        digits = (s->time == 0) ? 0 : (int)(std::log10(s->time) + 1);
         newIndexForMap = s->mapIndex * ((int)std::pow(10, digits)) + s->time;
         closed.insert(newIndexForMap);
 
@@ -179,7 +193,7 @@ static void computePath(
             newx = rX + dX[dir];
             newy = rY + dY[dir];
             newIndex = (int) GETMAPINDEX(newx, newy, x_size, y_size);
-            digits = (int)(std::log10(time) + 1);
+            digits = (time == 0) ? 0 : (int)(std::log10(time) + 1);
             newIndexForMap = newIndex * ((int)std::pow(10, digits)) + time; // concatenate time value to the end of index for unique key
             
             if(newx >= 1 and newx <= x_size and newy >= 1 and newy <= y_size and closed.find(newIndexForMap) == closed.end())
@@ -193,18 +207,20 @@ static void computePath(
                         // int h = (int) floor(sqrt(pow(newx - goalposeX, 2) + pow(newy - goalposeY, 2)));
                         // int h = (int) MAX(std::abs(newx - goalposeX), std::abs(newy - goalposeY)) * cost;
                         int h = heuristics[newIndex];
-                        std::shared_ptr<node> n(new node(newIndex, h, time));
+                        std::shared_ptr<node> n = std::make_shared<node>(newIndex, h, time);
                         // node* n = new node(newIndex, h, time);
                         nodes[newIndexForMap] = n;
+                        openQueue.push_back(n);
                     }
                     // mexPrintf("%d %d %d \n", nodes[newIndex]->g, s->g, cost);
                     if(nodes[newIndexForMap]->g > s->g + cost) // compare g values and cost, update parent if needed
                     {
-                        // mexPrintf("b \n");
-                        nodes[newIndexForMap]->g = s->g + cost;
-                        nodes[newIndexForMap]->f = nodes[newIndexForMap]->g + 2*nodes[newIndexForMap]->h; // weighted a*
-                        nodes[newIndexForMap]->parent = s;
-                        openQueue.push(nodes[newIndexForMap]);
+                        std::shared_ptr<node> t = nodes[newIndexForMap];
+                        openQueue.erase(std::find_if(openQueue.begin(), openQueue.end(), [t] (const std::shared_ptr<node>& d) { return (d->mapIndex == t->mapIndex) and (d->time == t->time); }));
+                        t->g = s->g + cost;
+                        t->f = t->g + 2*t->h;
+                        t->parent = s;
+                        openQueue.insert(std::upper_bound(openQueue.begin(), openQueue.end(), t, nodeCompare), t);
                     }
                 }
             }
@@ -236,12 +252,6 @@ static void planner(
     
     // for now greedily move towards the final target position,
     // but this is where you can put your planner
-    int gIndex;
-    for(int i = 0; i < target_steps; ++i) // setup multi-goal map
-    {
-        gIndex = GETMAPINDEX((int) target_traj[i], (int) target_traj[target_steps + i], x_size, y_size);
-        goals[gIndex] = i;
-    }
 
     int goalposeX = (int) target_traj[target_steps-1];
     int goalposeY = (int) target_traj[target_steps-1+target_steps];
@@ -263,25 +273,33 @@ static void planner(
     {
         firstCall = false;
 
-        int h = (int) MAX(abs(robotposeX-goalposeX), abs(robotposeY-goalposeY));
-        int index = GETMAPINDEX(goalposeX, goalposeY, x_size, y_size);
-        std::shared_ptr<node> a(new node(index, h, 0));
+        int gIndex;
+        for(int i = 0; i < target_steps; ++i) // setup multi-goal map
+        {
+            gIndex = GETMAPINDEX((int) target_traj[i], (int) target_traj[target_steps + i], x_size, y_size);
+            goals[gIndex] = i;
+        }
+
+        // int h = (int) MAX(abs(robotposeX-goalposeX), abs(robotposeY-goalposeY));
+        // int index = GETMAPINDEX(goalposeX, goalposeY, x_size, y_size);
+        std::shared_ptr<node> a = std::make_shared<node>(gIndex, 0, 0);
         // node* a = new node(index, h, 0);
         a->g = 0;
         a->f = a->g + a->h;
-        nodes[index] = a;
-        openQueue.push(a);
+        nodes[gIndex] = a;
+        openQueue.push_back(a);
         computeHeuristics(x_size, y_size, dX, dY, map, collision_thresh, nodes, heuristics, openQueue);
         nodes.clear();
+        mexPrintf("heuristics: %d", heuristics.size());
 
-        h = (int) MAX(abs(robotposeX-goalposeX), abs(robotposeY-goalposeY));
-        index = GETMAPINDEX(robotposeX, robotposeY, x_size, y_size);
-        std::shared_ptr<node> b(new node(index, h, 0));
+        int h = (int) MAX(abs(robotposeX-goalposeX), abs(robotposeY-goalposeY));
+        int index = GETMAPINDEX(robotposeX, robotposeY, x_size, y_size);
+        std::shared_ptr<node> b = std::make_shared<node>(index, h, 0);
         // node* b = new node(index, h, 0);
         b->g = 0;
         b->f = b->g + b->h;
         nodes[index] = b;
-        openQueue.push(b);
+        openQueue.push_back(b);
         // call compute path
         computePath(x_size, y_size, dX, dY, map, collision_thresh, target_traj, target_steps, goals, heuristics, nodes, closed, openQueue, actionStack);
     }
