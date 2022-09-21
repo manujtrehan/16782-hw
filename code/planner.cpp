@@ -12,6 +12,7 @@
 #include <memory>
 #include <algorithm>
 #include <vector>
+#include <chrono>
 
 /* Input Arguments */
 #define	MAP_IN                  prhs[0]
@@ -63,19 +64,21 @@ bool nodeCompare(const std::shared_ptr<node> n1, const std::shared_ptr<node> n2)
     return n1->f < n2->f;
 };
 
-// static auto compare = [](std::shared_ptr<node> n1, std::shared_ptr<node> n2)
-// {
-//     return n1->f > n2->f;
-// };
+static auto compare = [](std::shared_ptr<node> n1, std::shared_ptr<node> n2)
+{
+    return n1->f > n2->f;
+};
 
 // Globals
 bool firstCall = true;
 std::unordered_map<int, std::shared_ptr<node> > nodes;
-std::unordered_map<int, int> goals, heuristics;
+std::unordered_map<int, int> goals;
+std::unordered_map<int, std::pair<int, int> > heuristics;
 std::unordered_set<int> closed;
-// std::priority_queue<std::shared_ptr<node>, std::vector<std::shared_ptr<node> >, decltype(compare)> openQueue(compare);
-std::vector<std::shared_ptr<node> > openQueue;
+std::priority_queue<std::shared_ptr<node>, std::vector<std::shared_ptr<node> >, decltype(compare)> openQueue(compare);
+// std::vector<std::shared_ptr<node> > openQueue;
 std::stack<int> actionStack;
+std::chrono::time_point<std::chrono::steady_clock> startTime;
 
 int prevX, prevY;
 
@@ -87,16 +90,18 @@ static void computeHeuristics(
         double* map,
         int collision_thresh,
         std::unordered_map<int, std::shared_ptr<node> > &nodes,
-        std::unordered_map<int, int> &heuristics,
-        // std::priority_queue<std::shared_ptr<node>, std::vector<std::shared_ptr<node> >, decltype(compare)> &openQueue
-        std::vector<std::shared_ptr<node> > &openQueue
+        std::unordered_map<int, std::pair<int, int> > &heuristics,
+        std::priority_queue<std::shared_ptr<node>, std::vector<std::shared_ptr<node> >, decltype(compare)> &openQueue
+        // std::vector<std::shared_ptr<node> > &openQueue
         )
 {
     while(!openQueue.empty())
     {
-        std::shared_ptr<node> s = openQueue[0];
-        openQueue.erase(openQueue.begin());
-        heuristics[s->mapIndex] = s->g; // closed list. stores optimal g-vals
+        // std::shared_ptr<node> s = openQueue[0];
+        std::shared_ptr<node> s = openQueue.top();
+        openQueue.pop();
+        // openQueue.erase(openQueue.begin());
+        heuristics[s->mapIndex] = std::pair<int, int>(s->g, s->time); // closed list. stores optimal g-vals
 
         int rX = (int)(s->mapIndex % x_size) + 1;
         int rY = (int)(s->mapIndex / x_size) + 1;
@@ -115,19 +120,19 @@ static void computeHeuristics(
                     if(nodes.find(newIndex) == nodes.end()) // create a new node, if it does not exist
                     {
                         // int h = (int) MAX(abs(newx - goalposeX), abs(newy - goalposeY));
-                        std::shared_ptr<node> n = std::make_shared<node>(newIndex, 0, 0);
-                        // node* n = new node(newIndex, h);
+                        std::shared_ptr<node> n = std::make_shared<node>(newIndex, 0, s->time);
                         nodes[newIndex] = n;
-                        openQueue.push_back(n);
+                        // openQueue.push_back(n);
                     }
                     if(nodes[newIndex]->g > s->g + cost) // compare g values and cost, update parent if needed
                     {
                         std::shared_ptr<node> t = nodes[newIndex];
-                        openQueue.erase(std::find_if(openQueue.begin(), openQueue.end(), [t] (const std::shared_ptr<node>& d) { return d->mapIndex == t->mapIndex; }));
+                        // openQueue.erase(std::find_if(openQueue.begin(), openQueue.end(), [t] (const std::shared_ptr<node>& d) { return d->mapIndex == t->mapIndex; }));
                         t->g = s->g + cost;
                         t->f = t->g + t->h;
                         t->parent = s;
-                        openQueue.insert(std::upper_bound(openQueue.begin(), openQueue.end(), t, nodeCompare), t);
+                        // openQueue.insert(std::upper_bound(openQueue.begin(), openQueue.end(), t, nodeCompare), t);
+                        openQueue.push(t);
                     }
                 }
             }
@@ -145,22 +150,26 @@ static void computePath(
         double* target_traj,
         int target_steps,
         std::unordered_map<int, int> &goals,
-        std::unordered_map<int, int> &heuristics,
+        std::unordered_map<int, std::pair<int, int> > &heuristics,
         std::unordered_map<int, std::shared_ptr<node> > &nodes,
         std::unordered_set<int> &closed,
-        // std::priority_queue<std::shared_ptr<node>, std::vector<std::shared_ptr<node> >, decltype(compare)> &openQueue,
-        std::vector<std::shared_ptr<node> > &openQueue,
+        std::priority_queue<std::shared_ptr<node>, std::vector<std::shared_ptr<node> >, decltype(compare)> &openQueue,
+        // std::vector<std::shared_ptr<node> > &openQueue,
         std::stack<int> &actionStack
         )
 {
     int goalposeX = (int) target_traj[target_steps-1];
     int goalposeY = (int) target_traj[target_steps-1+target_steps];
-    int goalIndex = GETMAPINDEX(goalposeX, goalposeY, x_size, y_size);
+    // int goalIndex = GETMAPINDEX(goalposeX, goalposeY, x_size, y_size);
+    // int count = 0; // goalIndex = -1
     while(!openQueue.empty())
     {
+        int timeElapsed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - startTime).count();
         int newx, newy, newIndex, digits, newIndexForMap, cost;
-        std::shared_ptr<node> s = openQueue[0];
-        openQueue.erase(openQueue.begin());
+        // std::shared_ptr<node> s = openQueue[0];
+        std::shared_ptr<node> s = openQueue.top();
+        openQueue.pop();
+        // openQueue.erase(openQueue.begin());
         digits = (s->time == 0) ? 0 : (int)(std::log10(s->time) + 1);
         newIndexForMap = s->mapIndex * ((int)std::pow(10, digits)) + s->time;
         closed.insert(newIndexForMap);
@@ -170,8 +179,9 @@ static void computePath(
 
         // actionStack.push(s->mapIndex);
         // return;
-        mexPrintf("%d %d %d \n", rX, rY, s->time);
-        if(goals.find(s->mapIndex) != goals.end() and s->time <= goals[s->mapIndex])
+        mexPrintf("%d %d %d %d \n", rX, rY, s->time, s->f);
+
+        if(goals.find(s->mapIndex) != goals.end() and s->time == (goals[s->mapIndex] - timeElapsed))
         {
             // goal reached, add all to action stack and return
             while(s)
@@ -203,24 +213,23 @@ static void computePath(
                 {
                     if(nodes.find(newIndexForMap) == nodes.end()) // create a new node, if it does not exist
                     {
-                        // mexPrintf("a \n");
-                        // int h = (int) floor(sqrt(pow(newx - goalposeX, 2) + pow(newy - goalposeY, 2)));
                         // int h = (int) MAX(std::abs(newx - goalposeX), std::abs(newy - goalposeY)) * cost;
-                        int h = heuristics[newIndex];
+                        // int h = heuristics[newIndex].first + MAX((heuristics[newIndex].second - time), 0)*cost;
+                        int h = (goals.find(newIndex) != goals.end() and time < (goals[newIndex] - timeElapsed)) ? cost*(goals[newIndex] - timeElapsed - time) : heuristics[newIndex].first + MAX((heuristics[newIndex].second - timeElapsed - time), 0);
+                        // int h = (goals.find(newIndex) != goals.end()) ? 0 : heuristics[newIndex];
                         std::shared_ptr<node> n = std::make_shared<node>(newIndex, h, time);
-                        // node* n = new node(newIndex, h, time);
                         nodes[newIndexForMap] = n;
-                        openQueue.push_back(n);
+                        // openQueue.push_back(n);
                     }
-                    // mexPrintf("%d %d %d \n", nodes[newIndex]->g, s->g, cost);
                     if(nodes[newIndexForMap]->g > s->g + cost) // compare g values and cost, update parent if needed
                     {
                         std::shared_ptr<node> t = nodes[newIndexForMap];
-                        openQueue.erase(std::find_if(openQueue.begin(), openQueue.end(), [t] (const std::shared_ptr<node>& d) { return (d->mapIndex == t->mapIndex) and (d->time == t->time); }));
+                        // openQueue.erase(std::find_if(openQueue.begin(), openQueue.end(), [t] (const std::shared_ptr<node>& d) { return (d->mapIndex == t->mapIndex) and (d->time == t->time); }));
                         t->g = s->g + cost;
                         t->f = t->g + 2*t->h;
                         t->parent = s;
-                        openQueue.insert(std::upper_bound(openQueue.begin(), openQueue.end(), t, nodeCompare), t);
+                        // openQueue.insert(std::upper_bound(openQueue.begin(), openQueue.end(), t, nodeCompare), t);
+                        openQueue.push(t);
                     }
                 }
             }
@@ -259,47 +268,46 @@ static void planner(
     // printf("goal: %d %d;\n", goalposeX, goalposeY);
 
 
-    // static bool firstCall = true;
-    // static std::unordered_map<int, node*> nodes;
-    // static std::unordered_set<int> closed;
-
-    // static std::priority_queue<node*, std::vector<node*>, decltype(compare)> openQueue(compare);
-    // static std::stack<int> actionStack;
-
     prevX = robotposeX;
     prevY = robotposeY;
 
     if(firstCall) // init s_start, g(start) = 0, add to the open set, and node map
     {
+        startTime = std::chrono::steady_clock::now();
         firstCall = false;
 
         int gIndex;
         for(int i = 0; i < target_steps; ++i) // setup multi-goal map
         {
             gIndex = GETMAPINDEX((int) target_traj[i], (int) target_traj[target_steps + i], x_size, y_size);
-            goals[gIndex] = i;
+            // atleast 1 second will be skipped after execution (ceiling function). so subtract 1 sec from goal times
+            goals[gIndex] = std::abs(i - 1);
+
+            if(i > (target_steps/2))
+            {
+                std::shared_ptr<node> a = std::make_shared<node>(gIndex, 0, i - 1);
+                a->g = 0;
+                a->f = a->g + a->h;
+                nodes[gIndex] = a;
+                // openQueue.push_back(a);
+                openQueue.push(a);
+            }
         }
 
-        // int h = (int) MAX(abs(robotposeX-goalposeX), abs(robotposeY-goalposeY));
-        // int index = GETMAPINDEX(goalposeX, goalposeY, x_size, y_size);
-        std::shared_ptr<node> a = std::make_shared<node>(gIndex, 0, 0);
-        // node* a = new node(index, h, 0);
-        a->g = 0;
-        a->f = a->g + a->h;
-        nodes[gIndex] = a;
-        openQueue.push_back(a);
         computeHeuristics(x_size, y_size, dX, dY, map, collision_thresh, nodes, heuristics, openQueue);
         nodes.clear();
+        // openQueue.clear();
         mexPrintf("heuristics: %d", heuristics.size());
 
-        int h = (int) MAX(abs(robotposeX-goalposeX), abs(robotposeY-goalposeY));
+        // int h = (int) MAX(abs(robotposeX-goalposeX), abs(robotposeY-goalposeY));
         int index = GETMAPINDEX(robotposeX, robotposeY, x_size, y_size);
+        int h = heuristics[index].first;
         std::shared_ptr<node> b = std::make_shared<node>(index, h, 0);
-        // node* b = new node(index, h, 0);
         b->g = 0;
         b->f = b->g + b->h;
         nodes[index] = b;
-        openQueue.push_back(b);
+        // openQueue.push_back(b);
+        openQueue.push(b);
         // call compute path
         computePath(x_size, y_size, dX, dY, map, collision_thresh, target_traj, target_steps, goals, heuristics, nodes, closed, openQueue, actionStack);
     }
@@ -315,34 +323,6 @@ static void planner(
     action_ptr[1] = prevY;
 
     // End
-
-
-    // int bestX = 0, bestY = 0; // robot will not move if greedy action leads to collision
-    // double olddisttotarget = (double)sqrt(((robotposeX-goalposeX)*(robotposeX-goalposeX) + (robotposeY-goalposeY)*(robotposeY-goalposeY)));
-    // double disttotarget;
-    // for(int dir = 0; dir < NUMOFDIRS; dir++)
-    // {
-    //     int newx = robotposeX + dX[dir];
-    //     int newy = robotposeY + dY[dir];
-
-    //     if (newx >= 1 && newx <= x_size && newy >= 1 && newy <= y_size)
-    //     {
-    //         if (((int)map[GETMAPINDEX(newx,newy,x_size,y_size)] >= 0) && ((int)map[GETMAPINDEX(newx,newy,x_size,y_size)] < collision_thresh))  //if free
-    //         {
-    //             disttotarget = (double)sqrt(((newx-goalposeX)*(newx-goalposeX) + (newy-goalposeY)*(newy-goalposeY)));
-    //             if(disttotarget < olddisttotarget)
-    //             {
-    //                 olddisttotarget = disttotarget;
-    //                 bestX = dX[dir];
-    //                 bestY = dY[dir];
-    //             }
-    //         }
-    //     }
-    // }
-    // robotposeX = robotposeX + bestX;
-    // robotposeY = robotposeY + bestY;
-    // action_ptr[0] = robotposeX;
-    // action_ptr[1] = robotposeY;
     
     return;
 }
