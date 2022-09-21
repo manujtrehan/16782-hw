@@ -58,11 +58,11 @@ struct node
     }
 };
 
-bool nodeCompare(const std::shared_ptr<node> n1, const std::shared_ptr<node> n2)
-{
-    // return n1->f > n2->f;
-    return n1->f < n2->f;
-};
+// bool nodeCompare(const std::shared_ptr<node> n1, const std::shared_ptr<node> n2)
+// {
+//     // return n1->f > n2->f;
+//     return n1->f < n2->f;
+// };
 
 static auto compare = [](std::shared_ptr<node> n1, std::shared_ptr<node> n2)
 {
@@ -181,7 +181,7 @@ static void computePath(
         // return;
         mexPrintf("%d %d %d %d \n", rX, rY, s->time, s->f);
 
-        if(goals.find(s->mapIndex) != goals.end() and s->time == (goals[s->mapIndex] - timeElapsed))
+        if(goals.find(s->mapIndex) != goals.end() and s->time == (goals[s->mapIndex] - timeElapsed - 1))
         {
             // goal reached, add all to action stack and return
             while(s)
