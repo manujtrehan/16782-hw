@@ -88,12 +88,13 @@ static void computeHeuristics(
         int dX[],
         int dY[],
         double* map,
-        int collision_thresh,
-        std::unordered_map<int, std::shared_ptr<node> > &nodes,
-        std::unordered_map<int, std::pair<int, int> > &heuristics,
-        std::priority_queue<std::shared_ptr<node>, std::vector<std::shared_ptr<node> >, decltype(compare)> &openQueue
-        // std::vector<std::shared_ptr<node> > &openQueue
+        int collision_thresh
         )
+        // std::unordered_map<int, std::shared_ptr<node> > &nodes,
+        // std::unordered_map<int, std::pair<int, int> > &heuristics,
+        // std::priority_queue<std::shared_ptr<node>, std::vector<std::shared_ptr<node> >, decltype(compare)> &openQueue
+        // std::vector<std::shared_ptr<node> > &openQueue
+        // )
 {
     while(!openQueue.empty())
     {
@@ -148,15 +149,16 @@ static void computePath(
         double* map,
         int collision_thresh,
         double* target_traj,
-        int target_steps,
-        std::unordered_map<int, int> &goals,
-        std::unordered_map<int, std::pair<int, int> > &heuristics,
-        std::unordered_map<int, std::shared_ptr<node> > &nodes,
-        std::unordered_set<int> &closed,
-        std::priority_queue<std::shared_ptr<node>, std::vector<std::shared_ptr<node> >, decltype(compare)> &openQueue,
-        // std::vector<std::shared_ptr<node> > &openQueue,
-        std::stack<int> &actionStack
+        int target_steps
         )
+        // std::unordered_map<int, int> &goals,
+        // std::unordered_map<int, std::pair<int, int> > &heuristics,
+        // std::unordered_map<int, std::shared_ptr<node> > &nodes,
+        // std::unordered_set<int> &closed,
+        // std::priority_queue<std::shared_ptr<node>, std::vector<std::shared_ptr<node> >, decltype(compare)> &openQueue,
+        // std::vector<std::shared_ptr<node> > &openQueue,
+        // std::stack<int> &actionStack
+        // )
 {
     int goalposeX = (int) target_traj[target_steps-1];
     int goalposeY = (int) target_traj[target_steps-1+target_steps];
@@ -294,7 +296,7 @@ static void planner(
             }
         }
 
-        computeHeuristics(x_size, y_size, dX, dY, map, collision_thresh, nodes, heuristics, openQueue);
+        computeHeuristics(x_size, y_size, dX, dY, map, collision_thresh); //, nodes, heuristics, openQueue);
         nodes.clear();
         // openQueue.clear();
         mexPrintf("heuristics: %d", heuristics.size());
@@ -309,7 +311,7 @@ static void planner(
         // openQueue.push_back(b);
         openQueue.push(b);
         // call compute path
-        computePath(x_size, y_size, dX, dY, map, collision_thresh, target_traj, target_steps, goals, heuristics, nodes, closed, openQueue, actionStack);
+        computePath(x_size, y_size, dX, dY, map, collision_thresh, target_traj, target_steps); //, goals, heuristics, nodes, closed, openQueue, actionStack);
     }
     if(!actionStack.empty())
     {
