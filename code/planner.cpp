@@ -101,6 +101,7 @@ static void computeHeuristics(
         // std::shared_ptr<node> s = openQueue[0];
         std::shared_ptr<node> s = openQueue.top();
         openQueue.pop();
+        if(heuristics.find(s->mapIndex) != heuristics.end()) continue;
         // openQueue.erase(openQueue.begin());
         heuristics[s->mapIndex] = std::pair<int, int>(s->g, s->time); // closed list. stores optimal g-vals
 
@@ -179,12 +180,10 @@ static void computePath(
         int rX = (int)(s->mapIndex % x_size) + 1;
         int rY = (int)(s->mapIndex / x_size) + 1;
 
-        // actionStack.push(s->mapIndex);
-        // return;
-        mexPrintf("%d %d %d %d \n", rX, rY, s->time, s->f);
 
         if(goals.find(s->mapIndex) != goals.end() and s->time == (goals[s->mapIndex] - timeElapsed - 1))
         {
+            mexPrintf("%d %d %d %d \n", rX, rY, s->time, s->f);
             // goal reached, add all to action stack and return
             while(s)
             {
@@ -200,7 +199,7 @@ static void computePath(
         {
             continue;
         }
-        for(int dir = 0; dir < NUMOFDIRS + 1; ++dir)
+        for(int dir = 0; dir < (NUMOFDIRS + 1); ++dir)
         {
             newx = rX + dX[dir];
             newy = rY + dY[dir];
@@ -217,7 +216,8 @@ static void computePath(
                     {
                         // int h = (int) MAX(std::abs(newx - goalposeX), std::abs(newy - goalposeY)) * cost;
                         // int h = heuristics[newIndex].first + MAX((heuristics[newIndex].second - time), 0)*cost;
-                        int h = (goals.find(newIndex) != goals.end() and time < (goals[newIndex] - timeElapsed)) ? cost*(goals[newIndex] - timeElapsed - time) : heuristics[newIndex].first + MAX((heuristics[newIndex].second - timeElapsed - time), 0);
+                        int totalTime = timeElapsed + time;
+                        int h = (goals.find(newIndex) != goals.end() and time < (goals[newIndex] - timeElapsed)) ? cost*(goals[newIndex] - totalTime) : heuristics[newIndex].first + abs(heuristics[newIndex].second - totalTime); // MAX((heuristics[newIndex].second - totalTime), 0);
                         // int h = (goals.find(newIndex) != goals.end()) ? 0 : heuristics[newIndex];
                         std::shared_ptr<node> n = std::make_shared<node>(newIndex, h, time);
                         nodes[newIndexForMap] = n;
@@ -228,7 +228,7 @@ static void computePath(
                         std::shared_ptr<node> t = nodes[newIndexForMap];
                         // openQueue.erase(std::find_if(openQueue.begin(), openQueue.end(), [t] (const std::shared_ptr<node>& d) { return (d->mapIndex == t->mapIndex) and (d->time == t->time); }));
                         t->g = s->g + cost;
-                        t->f = t->g + 2*t->h;
+                        t->f = t->g + 1.8*t->h;
                         t->parent = s;
                         // openQueue.insert(std::upper_bound(openQueue.begin(), openQueue.end(), t, nodeCompare), t);
                         openQueue.push(t);
@@ -299,7 +299,7 @@ static void planner(
         computeHeuristics(x_size, y_size, dX, dY, map, collision_thresh); //, nodes, heuristics, openQueue);
         nodes.clear();
         // openQueue.clear();
-        mexPrintf("heuristics: %d", heuristics.size());
+        // mexPrintf("heuristics: %d", heuristics.size());
 
         // int h = (int) MAX(abs(robotposeX-goalposeX), abs(robotposeY-goalposeY));
         int index = GETMAPINDEX(robotposeX, robotposeY, x_size, y_size);
