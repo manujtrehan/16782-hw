@@ -154,7 +154,9 @@ int IsValidArmConfiguration(double* angles, int numofDOFs, double*	map,
 // std::default_random_engine re; //random number generation
 std::random_device re; //random number generation
 std::mt19937 gen(re());
+std::mt19937 goalGen(re());
 std::uniform_real_distribution<> sampleJoint(0, 2*PI);
+std::uniform_real_distribution<> goalDist(0, 1);
 std::vector<std::shared_ptr<Node> > nodeList;
 double** plan = NULL;
 
@@ -237,9 +239,9 @@ bool linInterp(
 	// std::cout << "4 " << numSamples << " " << maxAngleDiff << std::endl;
 	int i;
     for (i = 1; i <= numSamples; ++i){
+		ratio = (double) ((double) i / (double) numSamples);
 		for(int j = 0; j < numJoints; ++j)
 		{
-			ratio = (double) (i/numSamples);
             angles[j] = startNode->angles[j] + ratio*(newNode->angles[j] - startNode->angles[j]);
         }
 		// std::cout << "5" << std::endl;
@@ -337,10 +339,14 @@ int buildRRT(
     std::shared_ptr<Node> rNode, extendedNode;
     for(int iter = 0; iter < maxIter; ++iter)
     {
-        // sample a new random node
-        rNode = randomNode(numJoints);
+        // sample a new random node. set it equal to the goal with some goal bias probability
+		if(goalDist(goalGen) <= goalBias)
+		{
+			rNode = goal;
+			// std::cout << iter << " " << rNode->angles[0] << std::endl;
+		}
+        else rNode = randomNode(numJoints);
 		// std::cout << rNode->angles[0] << " " << rNode->angles[1] << " " << rNode->angles[2] << " " << rNode->angles[3] << " " << rNode->angles[4] << std::endl;
-		// std::cout << nodeList.size() << std::endl;
         
 		// try extending
 		extendedNode = extendRRT(rNode, map, x_size, y_size);

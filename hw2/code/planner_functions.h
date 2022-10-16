@@ -55,7 +55,9 @@ int IsValidArmConfiguration(double* angles, int numofDOFs, double*	map, int x_si
 // extern std::default_random_engine re; //random number generation
 extern std::random_device re; //random number generation
 extern std::mt19937 gen;
+extern std::mt19937 goalGen;
 extern std::uniform_real_distribution<> sampleJoint;
+extern std::uniform_real_distribution<> goalDist;
 
 struct Node
 {
@@ -73,8 +75,9 @@ struct Node
 };
 
 constexpr double epsilon = PI/10; // PI/20; // max angle change in a single step
-constexpr double stepSize = PI/60; // PI/180; // collision check interpolation step size
-constexpr double goalThresh = PI/6; // PI/90; // goal region threshold. each angle can be off by at max this value in radians
+constexpr double stepSize = PI/100; // PI/180; // collision check interpolation step size
+constexpr double goalThresh = PI/8; // PI/90; // goal region threshold. each angle can be off by at max this value in radians
+constexpr double goalBias = 0.05; // goal bias probability with which to sample directly towards the goal
 
 extern std::vector<std::shared_ptr<Node> > nodeList;
 

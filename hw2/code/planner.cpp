@@ -131,7 +131,7 @@ static void planner(
 
 	
 	// Start
-	int maxIter = 30000;
+	int maxIter = 25000;
 	*planlength = buildRRT(map, armstart_anglesV_rad, armgoal_anglesV_rad, x_size, y_size, maxIter, numofDOFs);
 	if(*planlength > 0)
 	{
