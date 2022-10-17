@@ -75,21 +75,25 @@ struct Node
 };
 
 constexpr double epsilon = PI/10; // PI/20; // max angle change in a single step
-constexpr double stepSize = PI/100; // PI/180; // collision check interpolation step size
+constexpr double epsilonConnect = __DBL_MAX__; // RRT Connect has infinite epsilon
+constexpr double stepSize = PI/90; // PI/180; // collision check interpolation step size
 constexpr double goalThresh = PI/8; // PI/90; // goal region threshold. each angle can be off by at max this value in radians
 constexpr double goalBias = 0.05; // goal bias probability with which to sample directly towards the goal
 
 extern std::vector<std::shared_ptr<Node> > nodeList;
+extern std::vector<std::shared_ptr<Node> > nodeList_B; // second list for RRT Connect
 
 std::shared_ptr<Node> randomNode(int numJoints);
 
-std::tuple<std::shared_ptr<Node>, double, double> nearestNeighbor(std::shared_ptr<Node> rNode);
+std::tuple<std::shared_ptr<Node>, double, double> nearestNeighbor(
+                                                        std::shared_ptr<Node> rNode,
+                                                        std::vector<std::shared_ptr<Node> >& nodes);
 
 std::tuple<double, double> getDistance(
                                 std::shared_ptr<Node> n1,
                                 std::shared_ptr<Node> n2);
 
-bool linInterp(
+std::tuple<bool, bool> linInterp(
         std::shared_ptr<Node> startNode,
         std::shared_ptr<Node> endNode,
         double* map,
@@ -97,17 +101,28 @@ bool linInterp(
         int y_size,
         double maxAngleDiff);
 
-std::shared_ptr<Node> extendRRT(
+std::tuple<std::shared_ptr<Node>, bool> extendRRT(
                         std::shared_ptr<Node> rNode,
+                        std::vector<std::shared_ptr<Node> >& nodes,
                         double* map,
                         int x_size,
-                        int y_size);
+                        int y_size,
+                        double eps);
 
 bool reachedGoal(
         std::shared_ptr<Node> goal,
         std::shared_ptr<Node> n);
 
 int buildRRT(
+		double* map,
+        double* armstart_anglesV_rad,
+		double* armgoal_anglesV_rad,
+		int x_size,
+		int y_size,
+        int maxIter,
+        int numJoints);
+
+int buildRRTConnect(
 		double* map,
         double* armstart_anglesV_rad,
 		double* armgoal_anglesV_rad,

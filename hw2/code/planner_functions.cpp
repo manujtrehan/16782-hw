@@ -158,6 +158,7 @@ std::mt19937 goalGen(re());
 std::uniform_real_distribution<> sampleJoint(0, 2*PI);
 std::uniform_real_distribution<> goalDist(0, 1);
 std::vector<std::shared_ptr<Node> > nodeList;
+std::vector<std::shared_ptr<Node> > nodeList_B;
 double** plan = NULL;
 
 Node::Node() : parentDist(__DBL_MAX__), parent(nullptr), distFromRoot(INT_MAX) {}
@@ -201,12 +202,12 @@ std::tuple<double, double> getDistance(std::shared_ptr<Node> n1, std::shared_ptr
     return std::make_tuple(sum, maxAngleDiff);
 }
 
-std::tuple<std::shared_ptr<Node>, double, double> nearestNeighbor(std::shared_ptr<Node> rNode)
+std::tuple<std::shared_ptr<Node>, double, double> nearestNeighbor(std::shared_ptr<Node> rNode, std::vector<std::shared_ptr<Node> >& nodes)
 {
     std::shared_ptr<Node> nearest;
     double minDist = __DBL_MAX__, newDist, angleDiff, maxAngleDiff;
 
-    for(auto i : nodeList)
+    for(std::shared_ptr<Node> i : nodes)
     {
         std::tie(newDist, angleDiff) = getDistance(i, rNode);
         if(minDist > newDist)
@@ -220,7 +221,7 @@ std::tuple<std::shared_ptr<Node>, double, double> nearestNeighbor(std::shared_pt
     return std::make_tuple(nearest, minDist, maxAngleDiff);
 }
 
-bool linInterp(
+std::tuple<bool, bool> linInterp(
 		std::shared_ptr<Node> startNode,
 		std::shared_ptr<Node> newNode,
 		double* map,
@@ -234,11 +235,11 @@ bool linInterp(
 	double *angles = new double[numJoints];
 	double *oldAngles = new double[numJoints];
 
-	if(numSamples == 0) return false; // stuck at start node. resample
+	// if(numSamples == 0) return false; // stuck at start node. resample
 
+	bool reached = true;
 	// std::cout << "4 " << numSamples << " " << maxAngleDiff << std::endl;
-	int i;
-    for (i = 1; i <= numSamples; ++i){
+    for (int i = 1; i <= numSamples; ++i){
 		ratio = (double) ((double) i / (double) numSamples);
 		for(int j = 0; j < numJoints; ++j)
 		{
@@ -250,13 +251,16 @@ bool linInterp(
 			// std::cout << "6" << std::endl;
 			std::copy(&angles[0], (&angles[0] + numJoints), &oldAngles[0]); // store previous angles: oldAngles = angles
 		}
-		else break;
+		else if(i == 1) // did not update angles at all. stuck at start node. resample
+		{
+			return std::make_tuple(false, false);
+		}
+		else
+		{
+			reached = false;
+			break;
+		}
     }
-
-	if(i == 1) // did not update angles at all. stuck at start node. resample
-	{
-		return false;
-	}
 
 	// node to add has angles = oldAngles. update angles of newNode
 	newNode->updateAngles(oldAngles, numJoints);
@@ -264,24 +268,26 @@ bool linInterp(
 	delete[] angles;
 	delete[] oldAngles;
 
-	return true;
+	return std::make_tuple(true, reached);
 }
 
-std::shared_ptr<Node> extendRRT(
+std::tuple<std::shared_ptr<Node>, bool> extendRRT(
 						std::shared_ptr<Node> rNode,
+						std::vector<std::shared_ptr<Node> >& nodes,
 						double* map,
 						int x_size,
-						int y_size)
+						int y_size,
+						double eps)
 {
     // get nearest neighbor
 	// std::cout << "2" << std::endl;
     std::shared_ptr<Node> nearestNode, newNode;
     double distance, maxAngleDiff;
-    std::tie(nearestNode, distance, maxAngleDiff) = nearestNeighbor(rNode);
+    std::tie(nearestNode, distance, maxAngleDiff) = nearestNeighbor(rNode, nodes);
 
-    if(maxAngleDiff > epsilon) // new node too far, take a step of amount epsilon
+    if(maxAngleDiff > eps) // new node too far, take a step of amount epsilon
     {
-        double step = epsilon/maxAngleDiff, angle; // ratio of step to take for all joints
+        double step = eps/maxAngleDiff, angle; // ratio of step to take for all joints
         std::vector<double> newAngles;
         for(int i = 0; i < nearestNode->angles.size(); ++i)
         {
@@ -289,18 +295,19 @@ std::shared_ptr<Node> extendRRT(
             newAngles.push_back(angle);
         }
         newNode = std::make_shared<Node>(newAngles); // create a new node with the new angle set
-        maxAngleDiff = epsilon; // update max angle difference
+        maxAngleDiff = eps; // update max angle difference
     }
     else // rNode is close enough, consider it as the new node to add
     {
         newNode = rNode;
     }
 	// std::cout << "3" << std::endl;
-
     // interpolate and check collisions until the new node
-    if(!linInterp(nearestNode, newNode, map, x_size, y_size, maxAngleDiff))
+	bool extended, reached;
+	std::tie(extended, reached) = linInterp(nearestNode, newNode, map, x_size, y_size, maxAngleDiff);
+    if(!extended)
 	{
-		return nullptr; // if could not interpolate at all due to obstacles, return nullptr. continue main loop iteration
+		return std::make_tuple(nullptr, false); // if could not interpolate at all due to obstacles, return nullptr. continue main loop iteration
 	}
 
 	// set parent and distance
@@ -309,9 +316,9 @@ std::shared_ptr<Node> extendRRT(
 	newNode->parent = nearestNode;
 	newNode->distFromRoot = nearestNode->distFromRoot + 1;
 
-	nodeList.push_back(newNode); // add new node to node list
+	nodes.push_back(newNode); // add new node to node list
 
-    return newNode;
+    return std::make_tuple(newNode, reached);
 }
 
 bool reachedGoal(std::shared_ptr<Node> goal, std::shared_ptr<Node> n)
@@ -336,7 +343,8 @@ int buildRRT(
 	start->distFromRoot = 0;
     nodeList.push_back(start);
 
-    std::shared_ptr<Node> rNode, extendedNode;
+    bool reached;
+	std::shared_ptr<Node> rNode, extendedNode;
     for(int iter = 0; iter < maxIter; ++iter)
     {
         // sample a new random node. set it equal to the goal with some goal bias probability
@@ -349,9 +357,9 @@ int buildRRT(
 		// std::cout << rNode->angles[0] << " " << rNode->angles[1] << " " << rNode->angles[2] << " " << rNode->angles[3] << " " << rNode->angles[4] << std::endl;
         
 		// try extending
-		extendedNode = extendRRT(rNode, map, x_size, y_size);
+		std::tie(extendedNode, reached) = extendRRT(rNode, nodeList, map, x_size, y_size, epsilon);
 		// std::cout << "7" << std::endl;
-		if(!extendedNode) continue; //if extend returns nullptr: continue iteration and resample
+		if(extendedNode == nullptr) continue; //if extend returns nullptr: continue iteration and resample
 
 		// check if goal reached
 		if(reachedGoal(goal, extendedNode))
@@ -378,6 +386,107 @@ int buildRRT(
 			return length;
 		}
     }
+
+	return 0;
+}
+
+
+int buildRRTConnect(
+		double* map,
+        double* armstart_anglesV_rad,
+		double* armgoal_anglesV_rad,
+		int x_size,
+		int y_size,
+        int maxIter,
+        int numJoints)
+{
+	std::shared_ptr<Node> start = std::make_shared<Node>(armstart_anglesV_rad, numJoints);
+    std::shared_ptr<Node> goal = std::make_shared<Node>(armgoal_anglesV_rad, numJoints);
+	start->distFromRoot = 0;
+	goal->distFromRoot = 0;
+    nodeList.push_back(start);
+    nodeList_B.push_back(goal);
+
+	std::shared_ptr<Node> rNode, extendedNode, extendedNode_A, extendedNode_B;
+	bool tree_A = true, reached;
+    for(int iter = 0; iter < maxIter; ++iter)
+	{
+		// sample a new random node
+		rNode = randomNode(numJoints);
+
+		// try extending
+		if(tree_A)
+		{
+			// first extend tree A
+			std::tie(extendedNode, reached) = extendRRT(rNode, nodeList, map, x_size, y_size, epsilonConnect);
+			if(extendedNode == nullptr) continue;
+			else
+			{
+				// try and connect to tree B
+				extendedNode_A = std::make_shared<Node>(extendedNode->angles);
+				std::tie(extendedNode_B, reached) = extendRRT(extendedNode_A, nodeList_B, map, x_size, y_size, epsilonConnect);
+				if(reached)
+				{
+					// backtrack
+					std::shared_ptr<Node> s = extendedNode;
+					int l1 = extendedNode->distFromRoot + 1, l2 = extendedNode_B->parent->distFromRoot + 1;
+					plan = new double*[l1 + l2];
+					for(int i = (l1 - 1); i >= 0; --i)
+					{
+						plan[i] = new double[numJoints];
+						std::copy(s->angles.begin(), s->angles.end(), plan[i]);
+						s = s->parent;
+					}
+					s = extendedNode_B->parent;
+					for(int i = l1; i < (l1 + l2); ++i)
+					{
+						plan[i] = new double[numJoints];
+						std::copy(s->angles.begin(), s->angles.end(), plan[i]);
+						s = s->parent;
+					}
+
+					return (l1 + l2);
+				}
+			}
+		}
+
+		else
+		{
+			// extend tree B
+			std::tie(extendedNode, reached) = extendRRT(rNode, nodeList_B, map, x_size, y_size, epsilonConnect);
+			if(extendedNode == nullptr) continue;
+			else
+			{
+				// try and connect to tree A
+				extendedNode_B = std::make_shared<Node>(extendedNode->angles);
+				std::tie(extendedNode_A, reached) = extendRRT(extendedNode_B, nodeList, map, x_size, y_size, epsilonConnect);
+				if(reached)
+				{
+					// backtrack
+					std::shared_ptr<Node> s = extendedNode_A;
+					int l1 = extendedNode_A->distFromRoot + 1, l2 = extendedNode->parent->distFromRoot + 1;
+					plan = new double*[l1 + l2];
+					for(int i = (l1 - 1); i >= 0; --i)
+					{
+						plan[i] = new double[numJoints];
+						std::copy(s->angles.begin(), s->angles.end(), plan[i]);
+						s = s->parent;
+					}
+					s = extendedNode->parent;
+					for(int i = l1; i < (l1 + l2); ++i)
+					{
+						plan[i] = new double[numJoints];
+						std::copy(s->angles.begin(), s->angles.end(), plan[i]);
+						s = s->parent;
+					}
+
+					return (l1 + l2);
+				}
+			}
+		}
+
+		tree_A = !tree_A; // swap trees
+	}
 
 	return 0;
 }
