@@ -5,6 +5,7 @@
 
 #include <iostream>
 #include <vector>
+#include <list>
 #include <memory>
 #include <random>
 #include <tuple>
@@ -62,7 +63,6 @@ extern std::uniform_real_distribution<> goalDist;
 struct Node
 {
     std::vector<double> angles; // vector of joint angles
-    double parentDist; // distance to parent node
     int distFromRoot; // number of nodes between root and current node - for allocating double** plan
     double cost; // cost from root - for RRT*
     std::shared_ptr<Node> parent; // pointer to parent node
@@ -95,7 +95,7 @@ std::tuple<std::shared_ptr<Node>, double, double> nearestNeighbor(
                                                         std::shared_ptr<Node> rNode,
                                                         std::vector<std::shared_ptr<Node> >& nodes);
 
-std::vector<std::tuple<int, double, double> > cheapestNeighbors(std::shared_ptr<Node> newNode);
+std::list<std::tuple<int, double, double> > cheapestNeighbors(std::shared_ptr<Node> newNode);
 
 std::tuple<bool, bool> linInterp(
         std::shared_ptr<Node> startNode,

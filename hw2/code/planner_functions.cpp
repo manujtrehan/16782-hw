@@ -161,11 +161,11 @@ std::vector<std::shared_ptr<Node> > nodeList;
 std::vector<std::vector<std::shared_ptr<Node> > > nodeList_AB(2); // RRT Connect - list of 2
 double** plan = NULL;
 
-Node::Node() : parentDist(__DBL_MAX__), parent(nullptr), distFromRoot(INT_MAX), cost(0) {}
+Node::Node() : parent(nullptr), distFromRoot(INT_MAX), cost(0) {}
 
-Node::Node(const std::vector<double> a) : angles(a), parentDist(__DBL_MAX__), parent(nullptr), distFromRoot(INT_MAX), cost(0) {}
+Node::Node(const std::vector<double> a) : angles(a), parent(nullptr), distFromRoot(INT_MAX), cost(0) {}
 
-Node::Node(const double* a, int size) : parentDist(__DBL_MAX__), parent(nullptr), distFromRoot(INT_MAX), cost(0)
+Node::Node(const double* a, int size) : parent(nullptr), distFromRoot(INT_MAX), cost(0)
 {
     angles = std::vector<double>(a, a + size); // convert a double array to a vector
 }
@@ -220,17 +220,22 @@ std::tuple<std::shared_ptr<Node>, double, double> nearestNeighbor(std::shared_pt
     return std::make_tuple(nearest, minDist, maxAngleDiff);
 }
 
-std::vector<std::tuple<int, double, double> > cheapestNeighbors(std::shared_ptr<Node> newNode)
+std::list<std::tuple<int, double, double> > cheapestNeighbors(std::shared_ptr<Node> newNode)
 {
-	double newDist, maxAngleDiff;
+	double newDist, maxAngleDiff, minDist = __DBL_MAX__;
 	int numJoints = newNode->angles.size();
-	std::vector<std::tuple<int, double, double> > indices;
+	std::list<std::tuple<int, double, double> > indices;
 	for(int i = 0; i < nodeList.size(); ++i)
 	{
 		std::tie(newDist, maxAngleDiff) = getDistance(nodeList[i], newNode);
 		if(newDist < (numJoints * searchRadius)) // store all nodes within the search radius - store (index, sum, maxAngleDiff)
 		{
-			indices.push_back(std::make_tuple(i, newDist, maxAngleDiff));
+			if(newDist < minDist) // add to front of list if it is the nearest neighbor till now
+			{
+				indices.push_front(std::make_tuple(i, newDist, maxAngleDiff));
+				newDist = minDist;
+			}
+			else indices.push_back(std::make_tuple(i, newDist, maxAngleDiff));
 		}
 	}
 	return indices;
@@ -327,7 +332,6 @@ std::tuple<std::shared_ptr<Node>, bool> extendRRT(
 
 	// set parent and distance
 	std::tie(distance, maxAngleDiff) = getDistance(nearestNode, newNode);
-	newNode->parentDist = distance;
 	newNode->parent = nearestNode;
 	newNode->cost = nearestNode->cost + distance;
 	newNode->distFromRoot = nearestNode->distFromRoot + 1;
@@ -351,8 +355,8 @@ void rewireRRTStar(
 			int x_size,
 			int y_size)
 {
-	// get a list of all nearest neighbors to the new node in a radius. returns vector of (index, sum, maxAngleDiff)
-	std::vector<std::tuple<int, double, double> > indices = cheapestNeighbors(newNode);
+	// get a list of all nearest neighbors to the new node in a radius. returns list of (index, sum, maxAngleDiff). nearest neighbor is the 1st element
+	std::list<std::tuple<int, double, double> > indices = cheapestNeighbors(newNode);
 	// std::cout << nodeList.size() << " " << indices.size() << std::endl;
 
 	bool extended, reached, update = false;
@@ -373,7 +377,6 @@ void rewireRRTStar(
 			c = nodeList[index]->cost + sum;
 			if(c < minCost) // found a cheaper node
 			{
-				std::cout << "yes" << std::endl;
 				min = i;
 				minCost = c;
 				update = true;
@@ -381,36 +384,36 @@ void rewireRRTStar(
 		}
 	}
 
-	std::tie(minIndex, sum, maxAngleDiff) = min;
-
-	if(update) // update newNode params and rewire tree only if a cheaper neighbor was found
+	if(update) // update newNode params only if a cheaper neighbor was found
 	{
+		std::tie(minIndex, sum, maxAngleDiff) = min;
 		newNode->parent = nodeList[minIndex];
-		newNode->parentDist = sum;
 		newNode->cost = minCost;
 		newNode->distFromRoot = nodeList[minIndex]->distFromRoot + 1;
-
-		// rewire tree
-		for(auto i : indices)
-		{
-			std::tie(index, sum, maxAngleDiff) = i;
-			if(index == minIndex) continue;
-
-			temp->angles = nodeList[index]->angles;
-			// try connecting the new node with all nodes in the nearest list. newNode is now the start node - however, it won't make a diff to linInterp
-			std::tie(extended, reached) = linInterp(newNode, temp, map, x_size, y_size, maxAngleDiff);
-			c = newNode->cost + sum;
-			if(reached and (c < nodeList[index]->cost))
-			{
-				// rewire node
-				nodeList[index]->parent = newNode;
-				nodeList[index]->parentDist = sum;
-				nodeList[index]->distFromRoot = newNode->distFromRoot + 1;
-				nodeList[index]->cost = c;
-			}
-		}
+	}
+	else // set minIndex to nearest neighbor which is present at the front of the list
+	{
+		std::tie(minIndex, sum, maxAngleDiff) = indices.front();
 	}
 
+	// rewire tree
+	for(auto i : indices)
+	{
+		std::tie(index, sum, maxAngleDiff) = i;
+		if(index == minIndex) continue;
+
+		temp->angles = nodeList[index]->angles;
+		// try connecting the new node with all nodes in the nearest list. newNode is now the start node - however, it won't make a diff to linInterp
+		std::tie(extended, reached) = linInterp(newNode, temp, map, x_size, y_size, maxAngleDiff);
+		c = newNode->cost + sum;
+		if(reached and (c < nodeList[index]->cost))
+		{
+			// rewire node
+			nodeList[index]->parent = newNode;
+			nodeList[index]->distFromRoot = newNode->distFromRoot + 1;
+			nodeList[index]->cost = c;
+		}
+	}
 }
 
 int buildRRT(
