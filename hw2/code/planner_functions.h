@@ -63,7 +63,8 @@ struct Node
 {
     std::vector<double> angles; // vector of joint angles
     double parentDist; // distance to parent node
-    int distFromRoot;
+    int distFromRoot; // number of nodes between root and current node - for allocating double** plan
+    double cost; // cost from root - for RRT*
     std::shared_ptr<Node> parent; // pointer to parent node
 
     // declare constructors
@@ -77,21 +78,24 @@ struct Node
 constexpr double epsilon = PI/10; // PI/20; // max angle change in a single step
 constexpr double epsilonConnect = __DBL_MAX__; // RRT Connect has infinite epsilon
 constexpr double stepSize = PI/90; // PI/180; // collision check interpolation step size
-constexpr double goalThresh = PI/8; // PI/90; // goal region threshold. each angle can be off by at max this value in radians
+constexpr double goalThresh = PI/6; // PI/90; // goal region threshold. each angle can be off by at max this value in radians
 constexpr double goalBias = 0.05; // goal bias probability with which to sample directly towards the goal
+constexpr double searchRadius = PI/60; // RRT* radius (per joint) to search around nearest node - total radius = numJoints * radius
 
 extern std::vector<std::shared_ptr<Node> > nodeList;
 extern std::vector<std::vector<std::shared_ptr<Node> > > nodeList_AB; // RRT Connect - vector of 2 node lists
 
 std::shared_ptr<Node> randomNode(int numJoints);
 
+std::tuple<double, double> getDistance(
+                                std::shared_ptr<Node> n1,
+                                std::shared_ptr<Node> n2);
+
 std::tuple<std::shared_ptr<Node>, double, double> nearestNeighbor(
                                                         std::shared_ptr<Node> rNode,
                                                         std::vector<std::shared_ptr<Node> >& nodes);
 
-std::tuple<double, double> getDistance(
-                                std::shared_ptr<Node> n1,
-                                std::shared_ptr<Node> n2);
+std::vector<std::tuple<int, double, double> > cheapestNeighbors(std::shared_ptr<Node> newNode);
 
 std::tuple<bool, bool> linInterp(
         std::shared_ptr<Node> startNode,
@@ -113,6 +117,12 @@ bool reachedGoal(
         std::shared_ptr<Node> goal,
         std::shared_ptr<Node> n);
 
+void rewireRRTStar(
+            std::shared_ptr<Node> newNode,
+            double* map,
+			int x_size,
+			int y_size);
+
 int buildRRT(
 		double* map,
         double* armstart_anglesV_rad,
@@ -123,6 +133,15 @@ int buildRRT(
         int numJoints);
 
 int buildRRTConnect(
+		double* map,
+        double* armstart_anglesV_rad,
+		double* armgoal_anglesV_rad,
+		int x_size,
+		int y_size,
+        int maxIter,
+        int numJoints);
+
+int buildRRTStar(
 		double* map,
         double* armstart_anglesV_rad,
 		double* armgoal_anglesV_rad,

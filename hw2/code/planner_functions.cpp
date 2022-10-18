@@ -161,11 +161,11 @@ std::vector<std::shared_ptr<Node> > nodeList;
 std::vector<std::vector<std::shared_ptr<Node> > > nodeList_AB(2); // RRT Connect - list of 2
 double** plan = NULL;
 
-Node::Node() : parentDist(__DBL_MAX__), parent(nullptr), distFromRoot(INT_MAX) {}
+Node::Node() : parentDist(__DBL_MAX__), parent(nullptr), distFromRoot(INT_MAX), cost(0) {}
 
-Node::Node(const std::vector<double> a) : angles(a), parentDist(__DBL_MAX__), parent(nullptr), distFromRoot(INT_MAX) {}
+Node::Node(const std::vector<double> a) : angles(a), parentDist(__DBL_MAX__), parent(nullptr), distFromRoot(INT_MAX), cost(0) {}
 
-Node::Node(const double* a, int size) : parentDist(__DBL_MAX__), parent(nullptr), distFromRoot(INT_MAX)
+Node::Node(const double* a, int size) : parentDist(__DBL_MAX__), parent(nullptr), distFromRoot(INT_MAX), cost(0)
 {
     angles = std::vector<double>(a, a + size); // convert a double array to a vector
 }
@@ -218,6 +218,22 @@ std::tuple<std::shared_ptr<Node>, double, double> nearestNeighbor(std::shared_pt
     }
 
     return std::make_tuple(nearest, minDist, maxAngleDiff);
+}
+
+std::vector<std::tuple<int, double, double> > cheapestNeighbors(std::shared_ptr<Node> newNode)
+{
+	double newDist, maxAngleDiff;
+	int numJoints = newNode->angles.size();
+	std::vector<std::tuple<int, double, double> > indices;
+	for(int i = 0; i < nodeList.size(); ++i)
+	{
+		std::tie(newDist, maxAngleDiff) = getDistance(nodeList[i], newNode);
+		if(newDist < (numJoints * searchRadius)) // store all nodes within the search radius - store (index, sum, maxAngleDiff)
+		{
+			indices.push_back(std::make_tuple(i, newDist, maxAngleDiff));
+		}
+	}
+	return indices;
 }
 
 std::tuple<bool, bool> linInterp(
@@ -313,6 +329,7 @@ std::tuple<std::shared_ptr<Node>, bool> extendRRT(
 	std::tie(distance, maxAngleDiff) = getDistance(nearestNode, newNode);
 	newNode->parentDist = distance;
 	newNode->parent = nearestNode;
+	newNode->cost = nearestNode->cost + distance;
 	newNode->distFromRoot = nearestNode->distFromRoot + 1;
 
 	nodes.push_back(newNode); // add new node to node list
@@ -326,6 +343,74 @@ bool reachedGoal(std::shared_ptr<Node> goal, std::shared_ptr<Node> n)
 	std::tie(sum, maxAngleDiff) = getDistance(goal, n);
 
 	return (maxAngleDiff <= goalThresh);
+}
+
+void rewireRRTStar(
+            std::shared_ptr<Node> newNode,
+			double* map,
+			int x_size,
+			int y_size)
+{
+	// get a list of all nearest neighbors to the new node in a radius. returns vector of (index, sum, maxAngleDiff)
+	std::vector<std::tuple<int, double, double> > indices = cheapestNeighbors(newNode);
+	// std::cout << nodeList.size() << " " << indices.size() << std::endl;
+
+	bool extended, reached, update = false;
+	int index, minIndex;
+	double c, sum, maxAngleDiff, minCost = newNode->cost;
+	std::tuple<int, double, double> min;
+	std::shared_ptr<Node> temp = std::make_shared<Node>(newNode->angles); // temp node so that newNode doesn't get updated in linInterp
+
+	for(auto i : indices)
+	{
+		std::tie(index, sum, maxAngleDiff) = i;
+		temp->angles = newNode->angles;
+
+		// try connecting the new node with all nodes in the nearest list
+		std::tie(extended, reached) = linInterp(nodeList[index], temp, map, x_size, y_size, maxAngleDiff);
+		if(reached)
+		{
+			c = nodeList[index]->cost + sum;
+			if(c < minCost) // found a cheaper node
+			{
+				std::cout << "yes" << std::endl;
+				min = i;
+				minCost = c;
+				update = true;
+			}
+		}
+	}
+
+	std::tie(minIndex, sum, maxAngleDiff) = min;
+
+	if(update) // update newNode params and rewire tree only if a cheaper neighbor was found
+	{
+		newNode->parent = nodeList[minIndex];
+		newNode->parentDist = sum;
+		newNode->cost = minCost;
+		newNode->distFromRoot = nodeList[minIndex]->distFromRoot + 1;
+
+		// rewire tree
+		for(auto i : indices)
+		{
+			std::tie(index, sum, maxAngleDiff) = i;
+			if(index == minIndex) continue;
+
+			temp->angles = nodeList[index]->angles;
+			// try connecting the new node with all nodes in the nearest list. newNode is now the start node - however, it won't make a diff to linInterp
+			std::tie(extended, reached) = linInterp(newNode, temp, map, x_size, y_size, maxAngleDiff);
+			c = newNode->cost + sum;
+			if(reached and (c < nodeList[index]->cost))
+			{
+				// rewire node
+				nodeList[index]->parent = newNode;
+				nodeList[index]->parentDist = sum;
+				nodeList[index]->distFromRoot = newNode->distFromRoot + 1;
+				nodeList[index]->cost = c;
+			}
+		}
+	}
+
 }
 
 int buildRRT(
@@ -358,7 +443,7 @@ int buildRRT(
 		// try extending
 		std::tie(extendedNode, reached) = extendRRT(rNode, nodeList, map, x_size, y_size, epsilon);
 		// std::cout << "7" << std::endl;
-		if(extendedNode == nullptr) continue; //if extend returns nullptr: continue iteration and resample
+		if(extendedNode == nullptr) continue; // if extend returns nullptr: continue iteration and resample
 
 		// check if goal reached
 		if(reachedGoal(goal, extendedNode))
@@ -447,6 +532,64 @@ int buildRRTConnect(
 
 				return (l1 + l2);
 			}
+		}
+	}
+
+	return 0;
+}
+
+int buildRRTStar(
+		double* map,
+        double* armstart_anglesV_rad,
+		double* armgoal_anglesV_rad,
+		int x_size,
+		int y_size,
+        int maxIter,
+        int numJoints)
+{
+	std::shared_ptr<Node> start = std::make_shared<Node>(armstart_anglesV_rad, numJoints);
+    std::shared_ptr<Node> goal = std::make_shared<Node>(armgoal_anglesV_rad, numJoints);
+	start->distFromRoot = 0;
+    nodeList.push_back(start);
+
+	bool reached;
+	std::shared_ptr<Node> rNode, extendedNode;
+    for(int iter = 0; iter < maxIter; ++iter)
+	{
+		// sample a new random node. set it equal to the goal with some goal bias probability
+		if(goalDist(goalGen) <= goalBias)
+		{
+			rNode = goal;
+		}
+        else rNode = randomNode(numJoints);
+
+		// try extending, get the new node which is added
+		std::tie(extendedNode, reached) = extendRRT(rNode, nodeList, map, x_size, y_size, epsilon);
+		if(extendedNode == nullptr) continue; // if extend returns nullptr: continue iteration and resample
+
+		// rewire tree
+		rewireRRTStar(extendedNode, map, x_size, y_size);
+
+		// check if goal reached
+		if(reachedGoal(goal, extendedNode))
+		{
+			// connect to goal
+			goal->parent = extendedNode;
+			goal->distFromRoot = extendedNode->distFromRoot + 1;
+			nodeList.push_back(goal);
+
+			// backtrack
+			std::shared_ptr<Node> s = goal;
+			int length = s->distFromRoot + 1;
+			plan = new double*[length];
+			for(int i = (length - 1); i >= 0; --i)
+			{
+				plan[i] = new double[numJoints];
+				std::copy(s->angles.begin(), s->angles.end(), plan[i]);
+				s = s->parent;
+			}
+
+			return length;
 		}
 	}
 
