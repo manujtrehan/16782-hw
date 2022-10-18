@@ -132,15 +132,40 @@ static void planner(
 	
 	// Start
 	int maxIter = 100000;
-	// *planlength = buildRRT(map, armstart_anglesV_rad, armgoal_anglesV_rad, x_size, y_size, maxIter, numofDOFs);
-	// *planlength = buildRRTConnect(map, armstart_anglesV_rad, armgoal_anglesV_rad, x_size, y_size, maxIter, numofDOFs);
-	*planlength = buildRRTStar(map, armstart_anglesV_rad, armgoal_anglesV_rad, x_size, y_size, maxIter, numofDOFs);
+	string p;
+	switch (whichPlanner)
+	{
+	case RRT:
+		*planlength = buildRRT(map, armstart_anglesV_rad, armgoal_anglesV_rad, x_size, y_size, maxIter, numofDOFs);
+		p = "RRT";
+		break;
+
+	case RRTCONNECT:
+		*planlength = buildRRTConnect(map, armstart_anglesV_rad, armgoal_anglesV_rad, x_size, y_size, maxIter, numofDOFs);
+		p = "RRT Connect";
+		break;
+
+	case RRTSTAR:
+		*planlength = buildRRTStar(map, armstart_anglesV_rad, armgoal_anglesV_rad, x_size, y_size, maxIter, numofDOFs);
+		p = "RRT*";
+		break;
+
+	case PRM:
+		p = "PRM";
+		break;
+
+	default:
+		*planlength = buildRRTStar(map, armstart_anglesV_rad, armgoal_anglesV_rad, x_size, y_size, maxIter, numofDOFs);
+		p = "RRT*";
+		break;
+	}
+
 	if(*planlength > 0)
 	{
-		std::cout << "Found Goal" << std::endl;
+		std::cout << "Found Goal - " + p << std::endl;
 		std::cout << *planlength << std::endl;
 	}
-	else std::cout << "Goal not found" << std::endl;
+	else std::cout << "Goal not found - " + p << std::endl;
 
 	return;
 
