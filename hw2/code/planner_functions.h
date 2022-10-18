@@ -81,7 +81,7 @@ constexpr double goalThresh = PI/8; // PI/90; // goal region threshold. each ang
 constexpr double goalBias = 0.05; // goal bias probability with which to sample directly towards the goal
 
 extern std::vector<std::shared_ptr<Node> > nodeList;
-extern std::vector<std::shared_ptr<Node> > nodeList_B; // second list for RRT Connect
+extern std::vector<std::vector<std::shared_ptr<Node> > > nodeList_AB; // RRT Connect - vector of 2 node lists
 
 std::shared_ptr<Node> randomNode(int numJoints);
 

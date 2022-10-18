@@ -158,7 +158,7 @@ std::mt19937 goalGen(re());
 std::uniform_real_distribution<> sampleJoint(0, 2*PI);
 std::uniform_real_distribution<> goalDist(0, 1);
 std::vector<std::shared_ptr<Node> > nodeList;
-std::vector<std::shared_ptr<Node> > nodeList_B;
+std::vector<std::vector<std::shared_ptr<Node> > > nodeList_AB(2); // RRT Connect - list of 2
 double** plan = NULL;
 
 Node::Node() : parentDist(__DBL_MAX__), parent(nullptr), distFromRoot(INT_MAX) {}
@@ -193,7 +193,6 @@ std::tuple<double, double> getDistance(std::shared_ptr<Node> n1, std::shared_ptr
 
     for(int i = 0; i < n1->angles.size(); ++i)
     {
-        // sumOfSq += std::pow((n1->angles[i] - n2->angles[i]), 2);
         angleDiff = std::fabs(n1->angles[i] - n2->angles[i]);
         if(angleDiff > maxAngleDiff) maxAngleDiff = angleDiff;
         sum += angleDiff;
@@ -237,8 +236,8 @@ std::tuple<bool, bool> linInterp(
 
 	// if(numSamples == 0) return false; // stuck at start node. resample
 
-	bool reached = true;
 	// std::cout << "4 " << numSamples << " " << maxAngleDiff << std::endl;
+	bool reached = true;
     for (int i = 1; i <= numSamples; ++i){
 		ratio = (double) ((double) i / (double) numSamples);
 		for(int j = 0; j < numJoints; ++j)
@@ -380,9 +379,6 @@ int buildRRT(
 				s = s->parent;
 			}
 
-			// std::cout << armstart_anglesV_rad[0] << " " << plan[0][0] << std::endl;
-			// std::cout << armgoal_anglesV_rad[0] << " " << plan[length-1][0] << std::endl;
-
 			return length;
 		}
     }
@@ -404,88 +400,54 @@ int buildRRTConnect(
     std::shared_ptr<Node> goal = std::make_shared<Node>(armgoal_anglesV_rad, numJoints);
 	start->distFromRoot = 0;
 	goal->distFromRoot = 0;
-    nodeList.push_back(start);
-    nodeList_B.push_back(goal);
+    nodeList_AB[0].push_back(start);
+    nodeList_AB[1].push_back(goal);
 
-	std::shared_ptr<Node> rNode, extendedNode, extendedNode_A, extendedNode_B;
-	bool tree_A = true, reached;
-    for(int iter = 0; iter < maxIter; ++iter)
+	std::shared_ptr<Node> rNode;
+	bool reached;
+	int a = 1, b = 0;
+	std::vector<std::shared_ptr<Node> > extendedList(2);
+
+	for(int iter = 0; iter < maxIter; ++iter)
 	{
+		// flip tree indices
+		a = 1 - a;
+		b = 1 - b;
+
 		// sample a new random node
 		rNode = randomNode(numJoints);
 
 		// try extending
-		if(tree_A)
-		{
-			// first extend tree A
-			std::tie(extendedNode, reached) = extendRRT(rNode, nodeList, map, x_size, y_size, epsilonConnect);
-			if(extendedNode == nullptr) continue;
-			else
-			{
-				// try and connect to tree B
-				extendedNode_A = std::make_shared<Node>(extendedNode->angles);
-				std::tie(extendedNode_B, reached) = extendRRT(extendedNode_A, nodeList_B, map, x_size, y_size, epsilonConnect);
-				if(reached)
-				{
-					// backtrack
-					std::shared_ptr<Node> s = extendedNode;
-					int l1 = extendedNode->distFromRoot + 1, l2 = extendedNode_B->parent->distFromRoot + 1;
-					plan = new double*[l1 + l2];
-					for(int i = (l1 - 1); i >= 0; --i)
-					{
-						plan[i] = new double[numJoints];
-						std::copy(s->angles.begin(), s->angles.end(), plan[i]);
-						s = s->parent;
-					}
-					s = extendedNode_B->parent;
-					for(int i = l1; i < (l1 + l2); ++i)
-					{
-						plan[i] = new double[numJoints];
-						std::copy(s->angles.begin(), s->angles.end(), plan[i]);
-						s = s->parent;
-					}
-
-					return (l1 + l2);
-				}
-			}
-		}
-
+		std::tie(extendedList[a], reached) = extendRRT(rNode, nodeList_AB[a], map, x_size, y_size, epsilonConnect);
+		if(extendedList[a] == nullptr) continue;
 		else
 		{
-			// extend tree B
-			std::tie(extendedNode, reached) = extendRRT(rNode, nodeList_B, map, x_size, y_size, epsilonConnect);
-			if(extendedNode == nullptr) continue;
-			else
+			// try and connect to the other tree
+			extendedList[b] = std::make_shared<Node>(extendedList[a]->angles);
+			std::tie(extendedList[b], reached) = extendRRT(extendedList[b], nodeList_AB[b], map, x_size, y_size, epsilonConnect);
+			if(reached)
 			{
-				// try and connect to tree A
-				extendedNode_B = std::make_shared<Node>(extendedNode->angles);
-				std::tie(extendedNode_A, reached) = extendRRT(extendedNode_B, nodeList, map, x_size, y_size, epsilonConnect);
-				if(reached)
+				// backtrack
+				std::shared_ptr<Node> s = extendedList[0];
+				int l1 = extendedList[0]->distFromRoot + 1, l2 = extendedList[1]->parent->distFromRoot + 1;
+				plan = new double*[l1 + l2];
+				for(int i = (l1 - 1); i >= 0; --i) // backtrack tree A
 				{
-					// backtrack
-					std::shared_ptr<Node> s = extendedNode_A;
-					int l1 = extendedNode_A->distFromRoot + 1, l2 = extendedNode->parent->distFromRoot + 1;
-					plan = new double*[l1 + l2];
-					for(int i = (l1 - 1); i >= 0; --i)
-					{
-						plan[i] = new double[numJoints];
-						std::copy(s->angles.begin(), s->angles.end(), plan[i]);
-						s = s->parent;
-					}
-					s = extendedNode->parent;
-					for(int i = l1; i < (l1 + l2); ++i)
-					{
-						plan[i] = new double[numJoints];
-						std::copy(s->angles.begin(), s->angles.end(), plan[i]);
-						s = s->parent;
-					}
-
-					return (l1 + l2);
+					plan[i] = new double[numJoints];
+					std::copy(s->angles.begin(), s->angles.end(), plan[i]);
+					s = s->parent;
 				}
+				s = extendedList[1]->parent;
+				for(int i = l1; i < (l1 + l2); ++i) // backtrack tree B
+				{
+					plan[i] = new double[numJoints];
+					std::copy(s->angles.begin(), s->angles.end(), plan[i]);
+					s = s->parent;
+				}
+
+				return (l1 + l2);
 			}
 		}
-
-		tree_A = !tree_A; // swap trees
 	}
 
 	return 0;
