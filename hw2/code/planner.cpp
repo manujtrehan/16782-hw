@@ -131,7 +131,7 @@ static void planner(
 
 	
 	// Start
-	int maxIter = 100000;
+	int maxIter = 100000, prmNodes = 10000;
 	string p;
 	switch (whichPlanner)
 	{
@@ -152,6 +152,7 @@ static void planner(
 
 	case PRM:
 		p = "PRM";
+		*planlength = buildPRM(map, armstart_anglesV_rad, armgoal_anglesV_rad, x_size, y_size, prmNodes, numofDOFs);
 		break;
 
 	default:

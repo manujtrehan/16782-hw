@@ -6,6 +6,9 @@
 #include <iostream>
 #include <vector>
 #include <list>
+#include <unordered_set>
+#include <set>
+#include <queue>
 #include <memory>
 #include <random>
 #include <tuple>
@@ -64,8 +67,14 @@ struct Node
 {
     std::vector<double> angles; // vector of joint angles
     int distFromRoot; // number of nodes between root and current node - for allocating double** plan
-    double cost; // cost from root - for RRT*
+    double cost; // cost from root for RRT* - also used as g-val for A* in PRM
     std::shared_ptr<Node> parent; // pointer to parent node
+
+    // PRM variables
+    int index;
+    double h;
+    double f;
+    std::vector<std::pair<int, double> > neighbors; // vector of children. stores a pair of (index, distance/cost)
 
     // declare constructors
     Node();
@@ -81,9 +90,18 @@ constexpr double stepSize = PI/90; // PI/180; // collision check interpolation s
 constexpr double goalThresh = PI/6; // PI/90; // goal region threshold. each angle can be off by at max this value in radians
 constexpr double goalBias = 0.05; // goal bias probability with which to sample directly towards the goal
 constexpr double searchRadius = PI/60; // RRT* radius (per joint) to search around nearest node - total radius = numJoints * radius
+constexpr double searchRadiusPRM = PI/10; // RRT* radius (per joint) to search around nearest node - total radius = numJoints * radius
+constexpr int nbrLimit = 10; // negihbor limit for connecting in the prm graph
 
 extern std::vector<std::shared_ptr<Node> > nodeList;
 extern std::vector<std::vector<std::shared_ptr<Node> > > nodeList_AB; // RRT Connect - vector of 2 node lists
+
+static auto compare = [](const std::shared_ptr<Node>& n1, const std::shared_ptr<Node>& n2)
+{
+    return n1->f > n2->f;
+};
+extern std::priority_queue<std::shared_ptr<Node>, std::vector<std::shared_ptr<Node> >, decltype(compare)> openQueue; // priority queue for A*
+extern std::unordered_set<int> closed; // closed list for A*
 
 std::shared_ptr<Node> randomNode(int numJoints);
 
@@ -95,7 +113,18 @@ std::tuple<std::shared_ptr<Node>, double, double> nearestNeighbor(
                                                         std::shared_ptr<Node> rNode,
                                                         std::vector<std::shared_ptr<Node> >& nodes);
 
-std::list<std::tuple<int, double, double> > cheapestNeighbors(std::shared_ptr<Node> newNode);
+std::list<std::tuple<int, double, double> > cheapestNeighbors(std::shared_ptr<Node> newNode, double searchRad);
+
+// comparison function to compare/order based on cost/sum
+static auto cmpCost = [](const std::tuple<int, double, double>& a, const std::tuple<int, double, double>& b) { return std::get<1>(a) < std::get<1>(b); };
+bool connectToNearestFree(
+            std::shared_ptr<Node> rNode,
+			std::vector<std::shared_ptr<Node> >& nodes,
+			double* map,
+			int x_size,
+			int y_size,
+			int numJoints,
+			bool setHeuristic);
 
 std::tuple<bool, bool> linInterp(
         std::shared_ptr<Node> startNode,
@@ -123,6 +152,8 @@ void rewireRRTStar(
 			int x_size,
 			int y_size);
 
+int computePath(std::shared_ptr<Node> goal);
+
 int buildRRT(
 		double* map,
         double* armstart_anglesV_rad,
@@ -148,6 +179,15 @@ int buildRRTStar(
 		int x_size,
 		int y_size,
         int maxIter,
+        int numJoints);
+
+int buildPRM(
+        double* map,
+        double* armstart_anglesV_rad,
+		double* armgoal_anglesV_rad,
+		int x_size,
+		int y_size,
+        int numNodes,
         int numJoints);
 
 

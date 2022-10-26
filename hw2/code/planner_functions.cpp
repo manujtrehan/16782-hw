@@ -159,13 +159,16 @@ std::uniform_real_distribution<> sampleJoint(0, 2*PI);
 std::uniform_real_distribution<> goalDist(0, 1);
 std::vector<std::shared_ptr<Node> > nodeList;
 std::vector<std::vector<std::shared_ptr<Node> > > nodeList_AB(2); // RRT Connect - list of 2
+std::priority_queue<std::shared_ptr<Node>, std::vector<std::shared_ptr<Node> >, decltype(compare)> openQueue(compare); // priority queue for A*
+std::unordered_set<int> closed; // closed list for A*
 double** plan = NULL;
 
-Node::Node() : parent(nullptr), distFromRoot(INT_MAX), cost(0) {}
+// struct definitions
+Node::Node() : parent(nullptr), distFromRoot(INT_MAX), cost(__DBL_MAX__) {}
 
-Node::Node(const std::vector<double> a) : angles(a), parent(nullptr), distFromRoot(INT_MAX), cost(0) {}
+Node::Node(const std::vector<double> a) : angles(a), parent(nullptr), distFromRoot(INT_MAX), cost(__DBL_MAX__) {}
 
-Node::Node(const double* a, int size) : parent(nullptr), distFromRoot(INT_MAX), cost(0)
+Node::Node(const double* a, int size) : parent(nullptr), distFromRoot(INT_MAX), cost(__DBL_MAX__)
 {
     angles = std::vector<double>(a, a + size); // convert a double array to a vector
 }
@@ -201,7 +204,9 @@ std::tuple<double, double> getDistance(std::shared_ptr<Node> n1, std::shared_ptr
     return std::make_tuple(sum, maxAngleDiff);
 }
 
-std::tuple<std::shared_ptr<Node>, double, double> nearestNeighbor(std::shared_ptr<Node> rNode, std::vector<std::shared_ptr<Node> >& nodes)
+std::tuple<std::shared_ptr<Node>, double, double> nearestNeighbor(
+													std::shared_ptr<Node> rNode,
+													std::vector<std::shared_ptr<Node> >& nodes)
 {
     std::shared_ptr<Node> nearest;
     double minDist = __DBL_MAX__, newDist, angleDiff, maxAngleDiff;
@@ -220,17 +225,17 @@ std::tuple<std::shared_ptr<Node>, double, double> nearestNeighbor(std::shared_pt
     return std::make_tuple(nearest, minDist, maxAngleDiff);
 }
 
-std::list<std::tuple<int, double, double> > cheapestNeighbors(std::shared_ptr<Node> newNode)
+std::list<std::tuple<int, double, double> > cheapestNeighbors(std::shared_ptr<Node> newNode, double searchRad)
 {
 	double newDist, maxAngleDiff, minDist = __DBL_MAX__;
 	int numJoints = newNode->angles.size();
-	std::list<std::tuple<int, double, double> > indices;
+	std::list<std::tuple<int, double, double> > indices; // (index, sum, maxAngleDiff)
 	for(int i = 0; i < nodeList.size(); ++i)
 	{
 		std::tie(newDist, maxAngleDiff) = getDistance(nodeList[i], newNode);
-		if(newDist < (numJoints * searchRadius)) // store all nodes within the search radius - store (index, sum, maxAngleDiff)
+		if(newDist < (numJoints * searchRad)) // store all nodes within the search radius - store (index, sum, maxAngleDiff)
 		{
-			if(newDist < minDist) // add to front of list if it is the nearest neighbor till now
+			if(newDist < minDist) // add to front of list if it is the nearest neighbor till now, so that closest neighbor is in the front
 			{
 				indices.push_front(std::make_tuple(i, newDist, maxAngleDiff));
 				newDist = minDist;
@@ -239,6 +244,66 @@ std::list<std::tuple<int, double, double> > cheapestNeighbors(std::shared_ptr<No
 		}
 	}
 	return indices;
+}
+
+bool connectToNearestFree(
+			std::shared_ptr<Node> rNode,
+			std::vector<std::shared_ptr<Node> >& nodes,
+			double* map,
+			int x_size,
+			int y_size,
+			int numJoints,
+			bool setHeuristic)
+{
+	// increasing order set of nearest neighbors - stores a tuple(index, sum/cost, maxAngleDiff)
+	std::set<std::tuple<int, double, double>, decltype(cmpCost)> nearest(cmpCost);
+    double newDist, maxAngleDiff;
+
+    for(int i = 0; i < nodes.size(); ++i)
+    {
+        std::tie(newDist, maxAngleDiff) = getDistance(nodes[i], rNode);
+		if(newDist < (numJoints * searchRadiusPRM)) // insert in nearest set only if within the search radius
+		{
+			nearest.insert(std::make_tuple(i, newDist, maxAngleDiff));
+		}
+
+		if(setHeuristic) // rNode is goal - set heuristics (goal distance) for all other nodes for A*
+		{
+			nodes[i]->h = newDist;
+		}
+    }
+
+	// try connecting rNode (start or goal) to the nearest neighbor in the nearest set
+	bool extended, reached = false;
+	int index;
+	std::shared_ptr<Node> temp = std::make_shared<Node>(rNode->angles); // temp node so that rNode does not get updated in linInterp
+	// std::cout << nearest.size() << std::endl;
+	for(auto i : nearest) // iterate over the increasing order set and try connecting one by one - stop when connected
+	{
+		std::tie(index, newDist, maxAngleDiff) = i;
+		std::tie(extended, reached) = linInterp(nodes[index], temp, map, x_size, y_size, maxAngleDiff);
+
+		if(reached)
+		{
+			// add edge
+			rNode->neighbors.push_back({index, newDist});
+			nodes[index]->neighbors.push_back({rNode->index, newDist});
+
+			if(setHeuristic) // if rNode is the goal node, set its parent node as well
+			{
+				rNode->parent = nodes[index];
+			}
+			else // rNode is the start node, set the parent for its neighbor, as well as distance from parent
+			{
+				nodes[index]->parent = rNode;
+				nodes[index]->distFromRoot = rNode->distFromRoot + 1;
+			}
+
+			break;
+		}
+	}
+
+    return reached;
 }
 
 std::tuple<bool, bool> linInterp(
@@ -356,7 +421,7 @@ void rewireRRTStar(
 			int y_size)
 {
 	// get a list of all nearest neighbors to the new node in a radius. returns list of (index, sum, maxAngleDiff). nearest neighbor is the 1st element
-	std::list<std::tuple<int, double, double> > indices = cheapestNeighbors(newNode);
+	std::list<std::tuple<int, double, double> > indices = cheapestNeighbors(newNode, searchRadius);
 	// std::cout << nodeList.size() << " " << indices.size() << std::endl;
 
 	bool extended, reached, update = false;
@@ -414,6 +479,55 @@ void rewireRRTStar(
 			nodeList[index]->cost = c;
 		}
 	}
+}
+
+int computePath(std::shared_ptr<Node> goal)
+{
+	int length = 0;
+	while(!openQueue.empty())
+	{
+		std::shared_ptr<Node> s = openQueue.top();
+		openQueue.pop();
+
+		if(closed.find(s->index) != closed.end()) continue; // skip if already visited
+		closed.insert(s->index); // add to closed list
+
+		if(s->index == goal->index)
+		{
+			// goal found. backtrack
+			length = s->distFromRoot + 1;
+			plan = new double*[length];
+			for(int i = (length - 1); i >= 0; --i)
+			{
+				plan[i] = new double[goal->angles.size()];
+				std::copy(s->angles.begin(), s->angles.end(), plan[i]);
+				s = s->parent;
+			}
+
+			return length;
+		}
+
+		int index;
+		double sum;
+		// std::cout << s->neighbors.size() << std::endl;
+		for(auto i : s->neighbors)
+		{
+			std::tie(index, sum) = i;
+			if(closed.find(index) == closed.end())
+			{
+				if(nodeList[index]->cost > (s->cost + sum))
+				{
+					nodeList[index]->cost = s->cost + sum;
+					nodeList[index]->f = nodeList[index]->cost + nodeList[index]->h;
+					nodeList[index]->parent = s;
+					nodeList[index]->distFromRoot = s->distFromRoot + 1;
+					openQueue.push(nodeList[index]);
+				}
+			}
+		}
+	}
+
+	return length;
 }
 
 int buildRRT(
@@ -553,6 +667,7 @@ int buildRRTStar(
 	std::shared_ptr<Node> start = std::make_shared<Node>(armstart_anglesV_rad, numJoints);
     std::shared_ptr<Node> goal = std::make_shared<Node>(armgoal_anglesV_rad, numJoints);
 	start->distFromRoot = 0;
+	start->cost = 0;
     nodeList.push_back(start);
 
 	bool reached;
@@ -597,4 +712,101 @@ int buildRRTStar(
 	}
 
 	return 0;
+}
+
+int buildPRM(
+        double* map,
+        double* armstart_anglesV_rad,
+		double* armgoal_anglesV_rad,
+		int x_size,
+		int y_size,
+        int numNodes,
+        int numJoints)
+{
+	std::shared_ptr<Node> rNode, temp = std::make_shared<Node>();
+	double* angArr = new double[numJoints];
+	std::list<std::tuple<int, double, double> > indices;
+	int index;
+	double sum, maxAngleDiff;
+	bool extended, reached;
+
+	while(nodeList.size() < numNodes) // build PRM graph until max number of nodes reached
+	{
+		// std::cout << nodeList.size() << std::endl;
+		// sample a random node
+		rNode = randomNode(numJoints);
+
+		std::copy(rNode->angles.begin(), rNode->angles.end(), angArr); // copy to a double* for checking validity
+		if(!IsValidArmConfiguration(angArr, numJoints, map, x_size, y_size)) continue; // if sample is invalid, resample
+
+		rNode->index = nodeList.size(); // set index of node and push it into the node list
+		nodeList.push_back(rNode);
+
+		indices = cheapestNeighbors(rNode, searchRadiusPRM); // get a list of neighbors within a radius
+
+		for(auto i : indices)
+		{
+			if(rNode->neighbors.size() == nbrLimit) break; // no more connections if neighbor limit reached
+			std::tie(index, sum, maxAngleDiff) = i;
+			if(nodeList[index]->neighbors.size() < nbrLimit) // connect to near-node only if that node has not crossed the neighbor limit
+			{
+				temp->angles = rNode->angles; // temp node so that rNode does not get changed in linInterp
+
+				// try connecting the new node (temp) with the corresponding 'index' node in the nearest list
+				std::tie(extended, reached) = linInterp(nodeList[index], temp, map, x_size, y_size, maxAngleDiff);
+
+				if(reached)
+				{
+					// add edge - add to neighbor lists
+					nodeList[index]->neighbors.push_back({rNode->index, sum});
+					rNode->neighbors.push_back({index, sum});
+				}
+			}
+		}
+	}
+
+	// std::cout << "Build PRM Graph" << std::endl;
+
+	// search for start and goal using A*
+
+	// connect start and goal to nearest nodes
+	std::shared_ptr<Node> start = std::make_shared<Node>(armstart_anglesV_rad, numJoints);
+	std::shared_ptr<Node> goal = std::make_shared<Node>(armgoal_anglesV_rad, numJoints);
+
+	// set index, cost and parent dist for start node - don't push in nodelist yet otherwise connectToNearestFree() will consider it
+	start->index = nodeList.size();
+	start->cost = 0;
+	start->distFromRoot = 0;
+
+    if(!connectToNearestFree(start, nodeList, map, x_size, y_size, numJoints, false)) // try and connect the start to nearest node
+	{
+		std::cout << "Obstacles near start - resample nodes" << std::endl;
+		return 0;
+	}
+
+	nodeList.push_back(start); // push start after it has been connected to a nearest neighbor
+
+	// process goal node now. set index and h-val
+	goal->index = nodeList.size();
+	goal->h = 0;
+
+	if(!connectToNearestFree(goal, nodeList, map, x_size, y_size, numJoints, true)) // try and connect the start to nearest node
+	{
+		std::cout << "Obstacles near goal - resample nodes" << std::endl;
+		return 0;
+	}
+
+	nodeList.push_back(goal); // push goal after it has been connected to a nearest neighbor
+
+	// update f for start - do it only after connecting goal since heuristic computation happens while connecting goal
+	start->f = start->cost + start->h;
+	// update f for neighbor of start - do it only after connecting goal since heuristic computation happens while connecting goal
+	index = start->neighbors[0].first;
+	nodeList[index]->f = nodeList[index]->cost + nodeList[index]->h;
+
+	// start A* search
+	openQueue.push(start); // add start node to the open queue
+	int length = computePath(goal);
+
+	return length;
 }
