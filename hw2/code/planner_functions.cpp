@@ -348,7 +348,7 @@ std::tuple<bool, bool> linInterp(
     }
 
 	// node to add has angles = oldAngles. update angles of newNode
-	newNode->updateAngles(oldAngles, numJoints);
+	if(!reached) newNode->updateAngles(oldAngles, numJoints);
 
 	delete[] angles;
 	delete[] oldAngles;
@@ -384,7 +384,7 @@ std::tuple<std::shared_ptr<Node>, bool> extendRRT(
     }
     else // rNode is close enough, consider it as the new node to add
     {
-        newNode = rNode;
+        newNode = std::make_shared<Node>(rNode->angles);
     }
 	// std::cout << "3" << std::endl;
     // interpolate and check collisions until the new node
@@ -406,12 +406,28 @@ std::tuple<std::shared_ptr<Node>, bool> extendRRT(
     return std::make_tuple(newNode, reached);
 }
 
-bool reachedGoal(std::shared_ptr<Node> goal, std::shared_ptr<Node> n)
+bool reachedGoal(
+		std::shared_ptr<Node> goal,
+		std::shared_ptr<Node> n,
+		double* map,
+		int x_size,
+		int y_size)
 {
 	double sum, maxAngleDiff;
 	std::tie(sum, maxAngleDiff) = getDistance(goal, n);
 
-	return (maxAngleDiff <= goalThresh);
+	bool extended, reached = false;
+	if(sum <= goal->angles.size()*goalThresh)
+	{
+		std::shared_ptr<Node> temp = std::make_shared<Node>(n->angles); // use temp node so that linInterp does not change node n angles
+
+		std::tie(extended, reached) = linInterp(goal, temp, map, x_size, y_size, maxAngleDiff);
+	}
+
+
+	return reached;
+	// return (sum <= 4*goalThresh);
+	// return (maxAngleDiff <= goalThresh);
 }
 
 void rewireRRTStar(
@@ -563,7 +579,7 @@ int buildRRT(
 		if(extendedNode == nullptr) continue; // if extend returns nullptr: continue iteration and resample
 
 		// check if goal reached
-		if(reachedGoal(goal, extendedNode))
+		if(reachedGoal(goal, extendedNode, map, x_size, y_size))
 		{
 			// connect to goal
 			goal->parent = extendedNode;
@@ -689,7 +705,7 @@ int buildRRTStar(
 		rewireRRTStar(extendedNode, map, x_size, y_size);
 
 		// check if goal reached
-		if(reachedGoal(goal, extendedNode))
+		if(reachedGoal(goal, extendedNode, map, x_size, y_size))
 		{
 			// connect to goal
 			goal->parent = extendedNode;

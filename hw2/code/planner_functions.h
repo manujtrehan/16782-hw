@@ -144,7 +144,10 @@ std::tuple<std::shared_ptr<Node>, bool> extendRRT(
 
 bool reachedGoal(
         std::shared_ptr<Node> goal,
-        std::shared_ptr<Node> n);
+		std::shared_ptr<Node> n,
+		double* map,
+		int x_size,
+		int y_size);
 
 void rewireRRTStar(
             std::shared_ptr<Node> newNode,
