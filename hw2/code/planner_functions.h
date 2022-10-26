@@ -61,7 +61,7 @@ extern std::random_device re; //random number generation
 extern std::mt19937 gen;
 extern std::mt19937 goalGen;
 extern std::uniform_real_distribution<> sampleJoint;
-extern std::uniform_real_distribution<> goalDist;
+extern std::uniform_real_distribution<> goalDist; // goal bias sampler
 
 struct Node
 {
@@ -84,6 +84,7 @@ struct Node
     void updateAngles(const double* a, int size);
 };
 
+// constants
 constexpr double epsilon = PI/10; // PI/20; // max angle change in a single step
 constexpr double epsilonConnect = __DBL_MAX__; // RRT Connect has infinite epsilon
 constexpr double stepSize = PI/90; // PI/180; // collision check interpolation step size
@@ -93,6 +94,7 @@ constexpr double searchRadius = PI/60; // RRT* radius (per joint) to search arou
 constexpr double searchRadiusPRM = PI/10; // RRT* radius (per joint) to search around nearest node - total radius = numJoints * radius
 constexpr int nbrLimit = 10; // negihbor limit for connecting in the prm graph
 
+// global variables
 extern std::vector<std::shared_ptr<Node> > nodeList;
 extern std::vector<std::vector<std::shared_ptr<Node> > > nodeList_AB; // RRT Connect - vector of 2 node lists
 

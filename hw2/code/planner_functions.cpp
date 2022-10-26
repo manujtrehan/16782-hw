@@ -156,14 +156,14 @@ std::random_device re; //random number generation
 std::mt19937 gen(re());
 std::mt19937 goalGen(re());
 std::uniform_real_distribution<> sampleJoint(0, 2*PI);
-std::uniform_real_distribution<> goalDist(0, 1);
-std::vector<std::shared_ptr<Node> > nodeList;
-std::vector<std::vector<std::shared_ptr<Node> > > nodeList_AB(2); // RRT Connect - list of 2
+std::uniform_real_distribution<> goalDist(0, 1); // goal bias distribution
+std::vector<std::shared_ptr<Node> > nodeList; // main nodelist
+std::vector<std::vector<std::shared_ptr<Node> > > nodeList_AB(2); // RRT Connect - list of 2 nodelists for swapping b/w A and B
 std::priority_queue<std::shared_ptr<Node>, std::vector<std::shared_ptr<Node> >, decltype(compare)> openQueue(compare); // priority queue for A*
 std::unordered_set<int> closed; // closed list for A*
-double** plan = NULL;
+double** plan = NULL; // double ** to store joint angles at each step of the plan
 
-// struct definitions
+// struct constructors and definitions
 Node::Node() : parent(nullptr), distFromRoot(INT_MAX), cost(__DBL_MAX__) {}
 
 Node::Node(const std::vector<double> a) : angles(a), parent(nullptr), distFromRoot(INT_MAX), cost(__DBL_MAX__) {}
@@ -173,12 +173,14 @@ Node::Node(const double* a, int size) : parent(nullptr), distFromRoot(INT_MAX), 
     angles = std::vector<double>(a, a + size); // convert a double array to a vector
 }
 
-void Node::updateAngles(const double* a, int size)
+void Node::updateAngles(const double* a, int size) // update angles of an existing struct
 {
 	angles = std::vector<double>(a, a + size); // convert a double array to a vector
 }
 
-std::shared_ptr<Node> randomNode(int numJoints)
+// function definitions
+
+std::shared_ptr<Node> randomNode(int numJoints) // sample and create a new random node struct object
 {
     std::shared_ptr<Node> n = std::make_shared<Node>();
     
@@ -190,7 +192,7 @@ std::shared_ptr<Node> randomNode(int numJoints)
     return n;
 }
 
-std::tuple<double, double> getDistance(std::shared_ptr<Node> n1, std::shared_ptr<Node> n2)
+std::tuple<double, double> getDistance(std::shared_ptr<Node> n1, std::shared_ptr<Node> n2) // get distance between 2 nodes. returns sum of absolute diff, and max diff
 {
     double sum = 0, maxAngleDiff = 0, angleDiff;
 
@@ -204,7 +206,7 @@ std::tuple<double, double> getDistance(std::shared_ptr<Node> n1, std::shared_ptr
     return std::make_tuple(sum, maxAngleDiff);
 }
 
-std::tuple<std::shared_ptr<Node>, double, double> nearestNeighbor(
+std::tuple<std::shared_ptr<Node>, double, double> nearestNeighbor( // returns the nearest neighbor - returns (node, sum, maxAngleDiff)
 													std::shared_ptr<Node> rNode,
 													std::vector<std::shared_ptr<Node> >& nodes)
 {
@@ -225,7 +227,7 @@ std::tuple<std::shared_ptr<Node>, double, double> nearestNeighbor(
     return std::make_tuple(nearest, minDist, maxAngleDiff);
 }
 
-std::list<std::tuple<int, double, double> > cheapestNeighbors(std::shared_ptr<Node> newNode, double searchRad)
+std::list<std::tuple<int, double, double> > cheapestNeighbors(std::shared_ptr<Node> newNode, double searchRad) // returns a list of nearest nbrs in a radius
 {
 	double newDist, maxAngleDiff, minDist = __DBL_MAX__;
 	int numJoints = newNode->angles.size();
@@ -246,7 +248,7 @@ std::list<std::tuple<int, double, double> > cheapestNeighbors(std::shared_ptr<No
 	return indices;
 }
 
-bool connectToNearestFree(
+bool connectToNearestFree( // for PRM - connects start and goal to the nearest accessible node
 			std::shared_ptr<Node> rNode,
 			std::vector<std::shared_ptr<Node> >& nodes,
 			double* map,
@@ -277,7 +279,7 @@ bool connectToNearestFree(
 	bool extended, reached = false;
 	int index;
 	std::shared_ptr<Node> temp = std::make_shared<Node>(rNode->angles); // temp node so that rNode does not get updated in linInterp
-	// std::cout << nearest.size() << std::endl;
+
 	for(auto i : nearest) // iterate over the increasing order set and try connecting one by one - stop when connected
 	{
 		std::tie(index, newDist, maxAngleDiff) = i;
@@ -306,7 +308,7 @@ bool connectToNearestFree(
     return reached;
 }
 
-std::tuple<bool, bool> linInterp(
+std::tuple<bool, bool> linInterp( // linear interpolation between 2 nodes - try and connect from start to the new node in steps
 		std::shared_ptr<Node> startNode,
 		std::shared_ptr<Node> newNode,
 		double* map,
@@ -322,7 +324,6 @@ std::tuple<bool, bool> linInterp(
 
 	// if(numSamples == 0) return false; // stuck at start node. resample
 
-	// std::cout << "4 " << numSamples << " " << maxAngleDiff << std::endl;
 	bool reached = true;
     for (int i = 1; i <= numSamples; ++i){
 		ratio = (double) ((double) i / (double) numSamples);
@@ -330,10 +331,9 @@ std::tuple<bool, bool> linInterp(
 		{
             angles[j] = startNode->angles[j] + ratio*(newNode->angles[j] - startNode->angles[j]);
         }
-		// std::cout << "5" << std::endl;
+
 		if(IsValidArmConfiguration(angles, numJoints, map, x_size, y_size))
 		{
-			// std::cout << "6" << std::endl;
 			std::copy(&angles[0], (&angles[0] + numJoints), &oldAngles[0]); // store previous angles: oldAngles = angles
 		}
 		else if(i == 1) // did not update angles at all. stuck at start node. resample
@@ -365,7 +365,6 @@ std::tuple<std::shared_ptr<Node>, bool> extendRRT(
 						double eps)
 {
     // get nearest neighbor
-	// std::cout << "2" << std::endl;
     std::shared_ptr<Node> nearestNode, newNode;
     double distance, maxAngleDiff;
     std::tie(nearestNode, distance, maxAngleDiff) = nearestNeighbor(rNode, nodes);
@@ -386,7 +385,6 @@ std::tuple<std::shared_ptr<Node>, bool> extendRRT(
     {
         newNode = std::make_shared<Node>(rNode->angles);
     }
-	// std::cout << "3" << std::endl;
     // interpolate and check collisions until the new node
 	bool extended, reached;
 	std::tie(extended, reached) = linInterp(nearestNode, newNode, map, x_size, y_size, maxAngleDiff);
@@ -417,17 +415,14 @@ bool reachedGoal(
 	std::tie(sum, maxAngleDiff) = getDistance(goal, n);
 
 	bool extended, reached = false;
-	if(sum <= goal->angles.size()*goalThresh)
+	if(sum <= goal->angles.size()*goalThresh) // interpolate and check only if the node is within threshold distance of the goal
 	{
 		std::shared_ptr<Node> temp = std::make_shared<Node>(n->angles); // use temp node so that linInterp does not change node n angles
 
 		std::tie(extended, reached) = linInterp(goal, temp, map, x_size, y_size, maxAngleDiff);
 	}
 
-
 	return reached;
-	// return (sum <= 4*goalThresh);
-	// return (maxAngleDiff <= goalThresh);
 }
 
 void rewireRRTStar(
@@ -568,14 +563,12 @@ int buildRRT(
 		if(goalDist(goalGen) <= goalBias)
 		{
 			rNode = goal;
-			// std::cout << iter << " " << rNode->angles[0] << std::endl;
 		}
         else rNode = randomNode(numJoints);
-		// std::cout << rNode->angles[0] << " " << rNode->angles[1] << " " << rNode->angles[2] << " " << rNode->angles[3] << " " << rNode->angles[4] << std::endl;
         
 		// try extending
 		std::tie(extendedNode, reached) = extendRRT(rNode, nodeList, map, x_size, y_size, epsilon);
-		// std::cout << "7" << std::endl;
+
 		if(extendedNode == nullptr) continue; // if extend returns nullptr: continue iteration and resample
 
 		// check if goal reached
@@ -748,7 +741,6 @@ int buildPRM(
 
 	while(nodeList.size() < numNodes) // build PRM graph until max number of nodes reached
 	{
-		// std::cout << nodeList.size() << std::endl;
 		// sample a random node
 		rNode = randomNode(numJoints);
 
@@ -780,8 +772,6 @@ int buildPRM(
 			}
 		}
 	}
-
-	// std::cout << "Build PRM Graph" << std::endl;
 
 	// search for start and goal using A*
 
