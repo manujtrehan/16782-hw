@@ -590,6 +590,8 @@ int buildRRT(
 				s = s->parent;
 			}
 
+			std::cout << "Num of nodes: " << nodeList.size() << std::endl;
+
 			return length;
 		}
     }
@@ -656,6 +658,8 @@ int buildRRTConnect(
 					s = s->parent;
 				}
 
+				std::cout << "Num of nodes: " << nodeList_AB[0].size() + nodeList_AB[1].size() << std::endl;
+
 				return (l1 + l2);
 			}
 		}
@@ -715,6 +719,8 @@ int buildRRTStar(
 				std::copy(s->angles.begin(), s->angles.end(), plan[i]);
 				s = s->parent;
 			}
+
+			std::cout << "Num of nodes: " << nodeList.size() << std::endl;
 
 			return length;
 		}
@@ -813,6 +819,8 @@ int buildPRM(
 	// start A* search
 	openQueue.push(start); // add start node to the open queue
 	int length = computePath(goal);
+
+	std::cout << "Num of nodes: " << nodeList.size() << std::endl;
 
 	return length;
 }
