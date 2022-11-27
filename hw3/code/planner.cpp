@@ -9,6 +9,10 @@
 #include <algorithm>
 #include <stdexcept>
 
+#include <limits.h>
+#include <queue>
+#include <memory>
+
 #define SYMBOLS 0
 #define INITIAL 1
 #define GOAL 2
@@ -371,6 +375,21 @@ public:
     unordered_set<string> get_symbols() const
     {
         return this->symbols;
+    }
+
+    unordered_set<Action, ActionHasher, ActionComparator> get_all_actions()
+    {
+        return this->actions;
+    }
+
+    unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> get_initial_condition() const
+    {
+        return this->initial_conditions;
+    }
+
+    unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> get_goal_condition() const
+    {
+        return this->goal_conditions;
     }
 
     friend ostream& operator<<(ostream& os, const Env& w)
@@ -741,9 +760,186 @@ Env* create_env(char* filename)
     return env;
 }
 
+
+
+
+/** Start **/
+
+
+
+struct CustomGC
+{
+    bool operator()(const GroundedCondition& lhs, const GroundedCondition& rhs) const
+    {
+        return lhs.toString() < rhs.toString();
+    }
+};
+
+struct Node
+{
+    // an alphabetically ordered set of conditions defining the state. order needed for hashing
+    set<GroundedCondition, CustomGC> conditions;
+    // g value of the state
+    int gVal;
+    // int hVal;
+    // int fVal;
+    shared_ptr<Node> parent;
+
+    // define constructors
+    Node() : gVal(INT_MAX) {}
+    Node(const int g) : gVal(g) {}
+    Node(const set<GroundedCondition, CustomGC>& c) : conditions(c), gVal(INT_MAX) {}
+
+    bool operator==(const Node& rhs) const
+    {
+        if (this->conditions.size() != rhs.conditions.size())
+            return false;
+
+        return (this->conditions == rhs.conditions);
+    }
+};
+
+struct NodeHasher
+{
+    size_t operator()(const shared_ptr<Node>& n) const
+    {
+        string hashStr;
+        for(auto i : n->conditions)
+        {
+            hashStr += i.toString();
+        }
+        return hash<string>{}(hashStr);
+    }
+};
+
+struct NodeComparator
+{
+    bool operator()(const shared_ptr<Node>& lhs, const shared_ptr<Node>& rhs) const
+    {
+        return *lhs == *rhs;
+    }
+};
+
+struct ActionMapHasher
+{
+    size_t operator()(const set<GroundedCondition, CustomGC>& s) const
+    {
+        string hashStr;
+        for(auto i : s)
+        {
+            hashStr += i.toString();
+        }
+        return hash<string>{}(hashStr);
+    }
+};
+
+struct ActionMapComparator
+{
+    bool operator()(const set<GroundedCondition, CustomGC>& lhs, const set<GroundedCondition, CustomGC>& rhs) const
+    {
+        return lhs == rhs;
+    }
+};
+
+static auto compare = [](const shared_ptr<Node>& n1, const shared_ptr<Node>& n2)
+{
+    return n1->gVal > n2->gVal;
+    // return n1->fVal > n2->fVal;
+};
+
+// globals
+priority_queue<shared_ptr<Node>, vector<shared_ptr<Node> >, decltype(compare)> openQueue(compare);
+unordered_set<shared_ptr<Node>, NodeHasher, NodeComparator> nodes;
+unordered_set<shared_ptr<Node>, NodeHasher, NodeComparator> closed;
+// maps states/preconditions to possible effects
+unordered_map<set<GroundedCondition, CustomGC>, vector<unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> >, ActionMapHasher, ActionMapComparator> actionMap;
+
+void generateCombos(const vector<string>& sym, int start, int k, list<string> curr, vector<list<string> >& combos)
+{
+    if(k == 0)
+    {
+        combos.push_back(curr);
+        return;
+    }
+    for(int i = start; i <= (sym.size() - k); ++i)
+    {
+        curr.push_back(sym[i]);
+        generateCombos(sym, i + 1, k - 1, curr, combos);
+        curr.pop_back();
+    }
+    return;
+}
+
+void buildActionMap(
+        unordered_set<Action, ActionHasher, ActionComparator>& actions,
+        unordered_set<string>& symbols)
+{
+    vector<string> sym;
+    for(auto i : symbols)
+    {
+        sym.push_back(i);
+    }
+
+    sort(sym.begin(), sym.end()); // sort symbols alphabetically
+    vector<list<string> > combos; // vector to store generated combos. need to permute over each element
+    set<GroundedCondition, CustomGC> preconds; // set of preconditions to add to the action map
+
+    // loop over all possible actions in env
+    for(auto& i : actions)
+    {
+        combos.clear(); // clear old combinations
+        int num = i.get_args().size(); // number of args in the action for combinations
+
+        // cout << i.get_name() << endl;
+        // generate all possible combinations of size 'num' from sym. stored in combos. then permute each element
+        generateCombos(sym, 0, num, list<string>{}, combos);
+        cout << combos.size() << endl;
+
+        // permute each element in combos
+        for(list<string> l : combos)
+        {
+            // cout << "next" << endl;
+            do
+            {
+                // for(auto p : l)
+                // {
+                //     cout << p << " ";
+                // }
+                // cout << endl;
+
+                // add precondition for this sequence of symbols to actionMap
+            } while (next_permutation(l.begin(), l.end()));
+            
+        }
+
+        // generate and store all preconditions using all symbol combinations
+    }
+}
+
+
+set<GroundedCondition, CustomGC> unorderedToOrderedGC(
+                                    const unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator>& uos)
+{
+    set<GroundedCondition, CustomGC> out;
+    for(auto val : uos)
+    {
+        out.insert(val);
+    }
+    return out;
+}
+
 list<GroundedAction> planner(Env* env)
 {
     // this is where you insert your planner
+
+    // get and order init and goal conditions to compare
+    set<GroundedCondition, CustomGC> init, goal;
+    init = unorderedToOrderedGC(env->get_initial_condition());
+    goal = unorderedToOrderedGC(env->get_goal_condition());
+
+    unordered_set<Action, ActionHasher, ActionComparator> all_actions = env->get_all_actions();
+    unordered_set<string> all_symbols = env->get_symbols();
+    buildActionMap(all_actions, all_symbols);
 
     // blocks world example
     list<GroundedAction> actions;
@@ -753,6 +949,13 @@ list<GroundedAction> planner(Env* env)
 
     return actions;
 }
+
+
+
+/** End **/
+
+
+
 
 int main(int argc, char* argv[])
 {
