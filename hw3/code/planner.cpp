@@ -104,6 +104,8 @@ public:
     string toString() const
     {
         string temp = "";
+        if (!this->truth) // added to ensure hash is unique for true/false
+            temp += "!";
         temp += this->predicate;
         temp += "(";
         for (string l : this->arg_values)
@@ -422,6 +424,12 @@ private:
     list<string> arg_values;
 
 public:
+    GroundedAction() // default constructor since it is a member in Node, and needs an empty constructor
+    {
+        this->name = "";
+        this->arg_values = list<string>{};
+    }
+
     GroundedAction(string name, list<string> arg_values)
     {
         this->name = name;
@@ -783,12 +791,13 @@ struct Node
     int gVal;
     // int hVal;
     // int fVal;
-    shared_ptr<Node> parent;
+    shared_ptr<Node> parent; // parent node
+    GroundedAction parent_action; // what action does the parent perform to reach current state
 
     // define constructors
-    Node() : gVal(INT_MAX) {}
-    Node(const int g) : gVal(g) {}
-    Node(const set<GroundedCondition, CustomGC>& c) : conditions(c), gVal(INT_MAX) {}
+    Node() : gVal(INT_MAX), parent(nullptr) {}
+    Node(const int g) : gVal(g), parent(nullptr) {}
+    Node(const set<GroundedCondition, CustomGC>& c) : conditions(c), gVal(INT_MAX), parent(nullptr) {}
 
     bool operator==(const Node& rhs) const
     {
@@ -801,12 +810,12 @@ struct Node
 
 struct NodeHasher
 {
-    size_t operator()(const shared_ptr<Node>& n) const
+    size_t operator()(const set<GroundedCondition, CustomGC>& gc_set) const
     {
         string hashStr;
-        for(auto i : n->conditions)
+        for(auto cond : gc_set)
         {
-            hashStr += i.toString();
+            hashStr += cond.toString();
         }
         return hash<string>{}(hashStr);
     }
@@ -822,12 +831,12 @@ struct NodeComparator
 
 struct ActionMapHasher
 {
-    size_t operator()(const set<GroundedCondition, CustomGC>& s) const
+    size_t operator()(const set<GroundedCondition, CustomGC>& gc_set) const
     {
         string hashStr;
-        for(auto i : s)
+        for(auto gc : gc_set)
         {
-            hashStr += i.toString();
+            hashStr += gc.toString();
         }
         return hash<string>{}(hashStr);
     }
@@ -847,14 +856,28 @@ static auto compare = [](const shared_ptr<Node>& n1, const shared_ptr<Node>& n2)
     // return n1->fVal > n2->fVal;
 };
 
-// globals
-priority_queue<shared_ptr<Node>, vector<shared_ptr<Node> >, decltype(compare)> openQueue(compare);
-unordered_set<shared_ptr<Node>, NodeHasher, NodeComparator> nodes;
-unordered_set<shared_ptr<Node>, NodeHasher, NodeComparator> closed;
-// maps states/preconditions to possible effects
-unordered_map<set<GroundedCondition, CustomGC>, vector<unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> >, ActionMapHasher, ActionMapComparator> actionMap;
+struct MultiDimMap
+{
+    unordered_map<GroundedCondition, shared_ptr<MultiDimMap>, GroundedConditionHasher, GroundedConditionComparator> multimap;
+    vector<pair<unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator>, GroundedAction> > value;
+    bool end;
 
-void generateCombos(const vector<string>& sym, int start, int k, list<string> curr, vector<list<string> >& combos)
+    MultiDimMap() : end(false) {}
+};
+
+// globals
+priority_queue<shared_ptr<Node>, vector<shared_ptr<Node> >, decltype(compare)> open_queue(compare);
+unordered_map<set<GroundedCondition, CustomGC>, shared_ptr<Node>, NodeHasher, NodeComparator> nodes;
+unordered_set<set<GroundedCondition, CustomGC>, NodeHasher, NodeComparator> closed;
+
+// action_map maps states/preconditions to possible pair of (effects, grounded action)
+// ordered set because Node has an ordered set. can use its member directly as a key
+MultiDimMap action_map;
+// unordered_map<set<GroundedCondition, CustomGC>,
+//                 vector<pair<unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator>, GroundedAction> >,
+//                 ActionMapHasher, ActionMapComparator> action_map;
+
+void generateCombos(const vector<string>& sym, int start, int k, vector<string>& curr, vector<vector<string> >& combos)
 {
     if(k == 0)
     {
@@ -875,45 +898,143 @@ void buildActionMap(
         unordered_set<string>& symbols)
 {
     vector<string> sym;
-    for(auto i : symbols)
+    for(string s : symbols)
     {
-        sym.push_back(i);
+        sym.push_back(s);
     }
 
     sort(sym.begin(), sym.end()); // sort symbols alphabetically
-    vector<list<string> > combos; // vector to store generated combos. need to permute over each element
+
+    vector<string> curr;
+    vector<vector<string> > combos; // vector to store generated combos. need to permute over each element
     set<GroundedCondition, CustomGC> preconds; // set of preconditions to add to the action map
+    unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> effects; // set of effects to match the preconditions and add to action map
+    unordered_map<string, string> sym_map; // map to match symbols between grounded and non-grounded stuff
 
     // loop over all possible actions in env
-    for(auto& i : actions)
+    for(auto& action : actions)
     {
         combos.clear(); // clear old combinations
-        int num = i.get_args().size(); // number of args in the action for combinations
+        int num_args = action.get_args().size(); // number of args in the action for combinations
 
-        // cout << i.get_name() << endl;
-        // generate all possible combinations of size 'num' from sym. stored in combos. then permute each element
-        generateCombos(sym, 0, num, list<string>{}, combos);
-        cout << combos.size() << endl;
+        cout << "Name of action: " << action.get_name() << endl;
+        // for(auto q : action.get_preconditions())
+        // {
+        //     cout << q << endl;
+        // }
+
+        // generate all possible combinations of size 'num_args' from sym. stored in combos. then permute each element
+        generateCombos(sym, 0, num_args, curr, combos);
+        cout << "Combo list size: " << combos.size() << endl;
 
         // permute each element in combos
-        for(list<string> l : combos)
+        for(vector<string> symbol_seq : combos)
         {
-            // cout << "next" << endl;
+            cout << "Next Combo" << endl;
             do
             {
-                // for(auto p : l)
-                // {
-                //     cout << p << " ";
-                // }
-                // cout << endl;
+                for(auto p : symbol_seq)
+                {
+                    cout << p << " ";
+                }
+                cout << endl;
 
-                // add precondition for this sequence of symbols to actionMap
-            } while (next_permutation(l.begin(), l.end()));
-            
+                sym_map.clear(); // clear the symbol map
+                int ind = 0;
+                list<string> ga_syms; // list of actual symbols for grounded action
+                for(string action_sym : action.get_args()) // map action symbols (x, y, b) to actual symbols (A, B, Table) in order
+                {
+                    sym_map[action_sym] = symbol_seq[ind];
+                    ga_syms.push_back(symbol_seq[ind]);
+                    ++ind;
+                }
+
+                // generate and add precondition for this sequence of symbols for action_map
+                preconds.clear();
+                for(auto pc : action.get_preconditions())
+                {
+                    // pc is of type Condition - convert to a GroundedCondition
+                    list<string> actual_args;
+                    for(string pc_arg : pc.get_args())
+                    {
+                        if(sym_map.find(pc_arg) != sym_map.end()) // if arg not in sym_map, use default arg
+                            actual_args.push_back(sym_map[pc_arg]);
+                        else actual_args.push_back(pc_arg);
+                    }
+                    GroundedCondition gc_precond(pc.get_predicate(), actual_args, pc.get_truth());
+                    preconds.insert(gc_precond);
+                }
+
+                // generate and add effects for this precondition for action_map
+                effects.clear();
+                for(auto eff : action.get_effects())
+                {
+                    // eff is of type Condition - convert it to a GroundedCondition
+                    list<string> actual_args;
+                    for(string eff_arg : eff.get_args())
+                    {
+                        if(sym_map.find(eff_arg) != sym_map.end()) // if arg not in sym_map, use default arg
+                            actual_args.push_back(sym_map[eff_arg]);
+                        else actual_args.push_back(eff_arg);
+                    }
+                    GroundedCondition gc_eff(eff.get_predicate(), actual_args, eff.get_truth());
+                    effects.insert(gc_eff);
+                }
+
+                // create the specific grounded action for action_map
+                GroundedAction ga(action.get_name(), ga_syms);
+
+                cout << ga << endl;
+                cout << "Preconds" << endl;
+                for(auto m : preconds)
+                {
+                    cout << m << endl;
+                }
+                cout << "Effects" << endl;
+                for(auto m : effects)
+                {
+                    cout << m << endl;
+                }
+                cout << "----" << endl;
+
+                // store precondition, effect and grounded action in multi layered action_map
+                MultiDimMap* multimap_ptr = &action_map; // no need to delete pointer since memory not on heap. normal ptr since not dynamically alloc
+                for(auto it = preconds.begin(); it != preconds.end(); ++it)
+                {
+                    if(multimap_ptr->multimap.find(*it) == multimap_ptr->multimap.end())
+                        multimap_ptr->multimap[*it] = make_shared<MultiDimMap>();
+                    if(next(it) == preconds.end()) // reached end of precondition, store (effect, action) pair
+                    {
+                        multimap_ptr->end = true;
+                        multimap_ptr->value.push_back({effects, ga});
+                        break;
+                    }
+                    else multimap_ptr = multimap_ptr->multimap[*it].get();
+                }
+                // action_map[preconds].push_back({effects, ga});
+
+            } while (next_permutation(symbol_seq.begin(), symbol_seq.end()));   
         }
-
-        // generate and store all preconditions using all symbol combinations
     }
+}
+
+tuple<bool, MultiDimMap*> findInActionMap(const set<GroundedCondition, CustomGC>& state)
+{
+    MultiDimMap* multimap_ptr = &action_map;
+    MultiDimMap* parent_ptr = nullptr;
+    for(auto cond : state)
+    {
+        if(multimap_ptr->multimap.find(cond) != multimap_ptr->multimap.end())
+        {
+            parent_ptr = multimap_ptr;
+            multimap_ptr = multimap_ptr->multimap[cond].get();
+        }
+    }
+    if(parent_ptr->value.empty())
+    {
+        return make_tuple(false, nullptr);
+    }
+    else return make_tuple(true, parent_ptr);
 }
 
 
@@ -940,6 +1061,23 @@ list<GroundedAction> planner(Env* env)
     unordered_set<Action, ActionHasher, ActionComparator> all_actions = env->get_all_actions();
     unordered_set<string> all_symbols = env->get_symbols();
     buildActionMap(all_actions, all_symbols);
+
+    for(auto i : init)
+    {
+        cout << i << endl;
+    }
+
+    // bool found;
+    // MultiDimMap* solution_vec;
+    // tie(found, solution_vec) = findInActionMap(init);
+    // cout << "Found " << found << endl;
+    // cout << "Size " << solution_vec->value.size() << endl;
+    // cout << solution_vec->value[0].second << endl;
+
+    // shared_ptr<Node> start = make_shared<Node>(init);
+    // start->gVal = 0;
+    // nodes[init] = start;
+    // open_queue.push(start);
 
     // blocks world example
     list<GroundedAction> actions;
