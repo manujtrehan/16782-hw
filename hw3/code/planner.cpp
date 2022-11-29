@@ -104,8 +104,8 @@ public:
     string toString() const
     {
         string temp = "";
-        if (!this->truth) // added to ensure hash is unique for true/false
-            temp += "!";
+        // if (!this->truth) // added to ensure hash is unique for true/false
+        //     temp += "!";
         temp += this->predicate;
         temp += "(";
         for (string l : this->arg_values)
@@ -823,9 +823,9 @@ struct NodeHasher
 
 struct NodeComparator
 {
-    bool operator()(const shared_ptr<Node>& lhs, const shared_ptr<Node>& rhs) const
+    bool operator()(const set<GroundedCondition, CustomGC>& lhs, const set<GroundedCondition, CustomGC>& rhs) const
     {
-        return *lhs == *rhs;
+        return lhs == rhs;
     }
 };
 
@@ -917,7 +917,7 @@ void buildActionMap(
         combos.clear(); // clear old combinations
         int num_args = action.get_args().size(); // number of args in the action for combinations
 
-        cout << "Name of action: " << action.get_name() << endl;
+        // cout << "Name of action: " << action.get_name() << endl;
         // for(auto q : action.get_preconditions())
         // {
         //     cout << q << endl;
@@ -925,19 +925,19 @@ void buildActionMap(
 
         // generate all possible combinations of size 'num_args' from sym. stored in combos. then permute each element
         generateCombos(sym, 0, num_args, curr, combos);
-        cout << "Combo list size: " << combos.size() << endl;
+        // cout << "Combo list size: " << combos.size() << endl;
 
         // permute each element in combos
         for(vector<string> symbol_seq : combos)
         {
-            cout << "Next Combo" << endl;
+            // cout << "Next Combo" << endl;
             do
             {
-                for(auto p : symbol_seq)
-                {
-                    cout << p << " ";
-                }
-                cout << endl;
+                // for(auto p : symbol_seq)
+                // {
+                //     cout << p << " ";
+                // }
+                // cout << endl;
 
                 sym_map.clear(); // clear the symbol map
                 int ind = 0;
@@ -984,18 +984,18 @@ void buildActionMap(
                 // create the specific grounded action for action_map
                 GroundedAction ga(action.get_name(), ga_syms);
 
-                cout << ga << endl;
-                cout << "Preconds" << endl;
-                for(auto m : preconds)
-                {
-                    cout << m << endl;
-                }
-                cout << "Effects" << endl;
-                for(auto m : effects)
-                {
-                    cout << m << endl;
-                }
-                cout << "----" << endl;
+                // cout << ga << endl;
+                // cout << "Preconds" << endl;
+                // for(auto m : preconds)
+                // {
+                //     cout << m << endl;
+                // }
+                // cout << "Effects" << endl;
+                // for(auto m : effects)
+                // {
+                //     cout << m << endl;
+                // }
+                // cout << "----" << endl;
 
                 // store precondition, effect and grounded action in multi layered action_map
                 MultiDimMap* multimap_ptr = &action_map; // no need to delete pointer since memory not on heap. normal ptr since not dynamically alloc
@@ -1003,8 +1003,10 @@ void buildActionMap(
                 {
                     if(multimap_ptr->multimap.find(*it) == multimap_ptr->multimap.end())
                         multimap_ptr->multimap[*it] = make_shared<MultiDimMap>();
+                    // cout << *it << endl;
                     if(next(it) == preconds.end()) // reached end of precondition, store (effect, action) pair
                     {
+                        multimap_ptr = multimap_ptr->multimap[*it].get(); // move to child node and store there
                         multimap_ptr->end = true;
                         multimap_ptr->value.push_back({effects, ga});
                         break;
@@ -1018,23 +1020,140 @@ void buildActionMap(
     }
 }
 
-tuple<bool, MultiDimMap*> findInActionMap(const set<GroundedCondition, CustomGC>& state)
+tuple<bool, MultiDimMap*> findInActionMap(
+                            const set<GroundedCondition, CustomGC>& state,
+                            MultiDimMap* multimap_ptr,
+                            MultiDimMap* parent_ptr,
+                            vector<MultiDimMap*>& output,
+                            int n)
 {
-    MultiDimMap* multimap_ptr = &action_map;
-    MultiDimMap* parent_ptr = nullptr;
-    for(auto cond : state)
+    // MultiDimMap* multimap_ptr = &action_map;
+    // MultiDimMap* parent_ptr = nullptr;
+    auto cond = state.begin();
+    if(n > 0) advance(cond, n);
+
+    for(auto end = state.end(); cond != end; ++cond)
     {
-        if(multimap_ptr->multimap.find(cond) != multimap_ptr->multimap.end())
+        if(multimap_ptr->multimap.find(*cond) != multimap_ptr->multimap.end())
         {
+            // cout << "Debug: " << *cond << endl;
+            MultiDimMap* next_ptr = multimap_ptr->multimap[*cond].get();
             parent_ptr = multimap_ptr;
-            multimap_ptr = multimap_ptr->multimap[cond].get();
+            findInActionMap(state, next_ptr, parent_ptr, output, n + 1);
+            // multimap_ptr = next_ptr;
         }
     }
-    if(parent_ptr->value.empty())
+    if(multimap_ptr->value.empty())
     {
         return make_tuple(false, nullptr);
     }
-    else return make_tuple(true, parent_ptr);
+    else
+    {
+        output.push_back(multimap_ptr);
+        // cout << "Returned" << endl;
+        return make_tuple(true, multimap_ptr);
+    }
+}
+
+void addEffectToState(
+        set<GroundedCondition, CustomGC>& state,
+        unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator>& effects)
+{
+    for(auto effect : effects)
+    {
+        if(!effect.get_truth())
+        {
+            state.erase(effect);
+        }
+        else
+        {
+            state.insert(effect);
+        }
+    }
+}
+
+bool isGoal(
+        set<GroundedCondition, CustomGC>& currState,
+        set<GroundedCondition, CustomGC>& goal)
+{
+    for(auto gc : goal)
+    {
+        if(currState.find(gc) == currState.end()) // current state doesn't contain goal condition
+            return false;
+    }
+    return true;
+}
+
+list<GroundedAction> computePath(set<GroundedCondition, CustomGC>& goal)
+{
+	int cost = 1;
+	while(!open_queue.empty())
+	{
+        // cout << "Open queue size: " << open_queue.size() << endl;
+		shared_ptr<Node> s = open_queue.top();
+		open_queue.pop();
+        // cout << "Current state:" << endl;
+        // for(auto i : s->conditions)
+        // {
+        //     cout << i << endl;
+        // }
+
+		if(closed.find(s->conditions) != closed.end()) continue; // skip if already visited
+		closed.insert(s->conditions); // add to closed list
+
+		if(isGoal(s->conditions, goal)) // check if goal
+		{
+			// goal found. backtrack
+			list<GroundedAction> plan;
+            while(s)
+            {
+                plan.push_front(s->parent_action);
+                s = s->parent;
+            }
+            plan.pop_front(); // remove starting empty action
+            return plan;
+		}
+
+		unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> effect;
+		GroundedAction grounded_action;
+        bool found;
+        MultiDimMap* solution_ptr;
+        vector<MultiDimMap*> output;
+        tie(found, solution_ptr) = findInActionMap(s->conditions, &action_map, nullptr, output, 0); // find possible actions based on current state
+		// cout << output.size() << endl;
+        for(MultiDimMap* solution_ptr : output)
+        {
+            for(auto effect_action_pair : solution_ptr->value)
+            {
+                tie(effect, grounded_action) = effect_action_pair;
+                // cout << "Next action: " << grounded_action << endl;
+                set<GroundedCondition, CustomGC> child_conditions = s->conditions; // copy parent conditions to child
+                // add effects to child conditions
+                addEffectToState(child_conditions, effect);
+
+                if(closed.find(child_conditions) == closed.end())
+                {
+                    if(nodes.find(child_conditions) == nodes.end())
+                    {
+                        shared_ptr<Node> newNode = make_shared<Node>(child_conditions);
+                        nodes[child_conditions] = newNode;
+                    }
+                    if(nodes[child_conditions]->gVal > (s->gVal + cost))
+                    {
+                        nodes[child_conditions]->gVal = s->gVal + cost;
+                        // nodeList[index]->f = nodeList[index]->cost + nodeList[index]->h;
+                        nodes[child_conditions]->parent = s;
+                        nodes[child_conditions]->parent_action = grounded_action;
+                        open_queue.push(nodes[child_conditions]);
+                    }
+                }
+            }
+        }
+        // break;
+        // cout << endl;
+	}
+
+	return list<GroundedAction>{};
 }
 
 
@@ -1062,10 +1181,12 @@ list<GroundedAction> planner(Env* env)
     unordered_set<string> all_symbols = env->get_symbols();
     buildActionMap(all_actions, all_symbols);
 
-    for(auto i : init)
-    {
-        cout << i << endl;
-    }
+    // for(auto i : init)
+    // {
+    //     cout << i << endl;
+    // }
+    // cout << endl;
+    // cout << "Start:" << endl;
 
     // bool found;
     // MultiDimMap* solution_vec;
@@ -1074,16 +1195,18 @@ list<GroundedAction> planner(Env* env)
     // cout << "Size " << solution_vec->value.size() << endl;
     // cout << solution_vec->value[0].second << endl;
 
-    // shared_ptr<Node> start = make_shared<Node>(init);
-    // start->gVal = 0;
-    // nodes[init] = start;
-    // open_queue.push(start);
+    shared_ptr<Node> start = make_shared<Node>(init);
+    start->gVal = 0;
+    nodes[init] = start;
+    open_queue.push(start);
+
+    list<GroundedAction> actions;
+    actions = computePath(goal);
 
     // blocks world example
-    list<GroundedAction> actions;
-    actions.push_back(GroundedAction("MoveToTable", { "A", "B" }));
-    actions.push_back(GroundedAction("Move", { "C", "Table", "A" }));
-    actions.push_back(GroundedAction("Move", { "B", "Table", "C" }));
+    // actions.push_back(GroundedAction("MoveToTable", { "A", "B" }));
+    // actions.push_back(GroundedAction("Move", { "C", "Table", "A" }));
+    // actions.push_back(GroundedAction("Move", { "B", "Table", "C" }));
 
     return actions;
 }
@@ -1098,7 +1221,7 @@ list<GroundedAction> planner(Env* env)
 int main(int argc, char* argv[])
 {
     // DO NOT CHANGE THIS FUNCTION
-    char* filename = (char*)("example.txt");
+    char* filename = (char*)("Blocks.txt");
     if (argc > 1)
         filename = argv[1];
 
