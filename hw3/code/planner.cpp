@@ -789,15 +789,16 @@ struct Node
     set<GroundedCondition, CustomGC> conditions;
     // g value of the state
     int gVal;
-    // int hVal;
-    // int fVal;
+    int hVal;
+    int fVal;
     shared_ptr<Node> parent; // parent node
     GroundedAction parent_action; // what action does the parent perform to reach current state
 
     // define constructors
-    Node() : gVal(INT_MAX), parent(nullptr) {}
+    Node() : gVal(INT_MAX), fVal(INT_MAX), parent(nullptr) {}
     Node(const int g) : gVal(g), parent(nullptr) {}
-    Node(const set<GroundedCondition, CustomGC>& c) : conditions(c), gVal(INT_MAX), parent(nullptr) {}
+    Node(const set<GroundedCondition, CustomGC>& c) : conditions(c), gVal(INT_MAX), fVal(INT_MAX), parent(nullptr) {}
+    Node(const set<GroundedCondition, CustomGC>& c, const int h) : conditions(c), gVal(INT_MAX), fVal(INT_MAX), hVal(h), parent(nullptr) {}
 
     bool operator==(const Node& rhs) const
     {
@@ -852,8 +853,8 @@ struct ActionMapComparator
 
 static auto compare = [](const shared_ptr<Node>& n1, const shared_ptr<Node>& n2)
 {
-    return n1->gVal > n2->gVal;
-    // return n1->fVal > n2->fVal;
+    // return n1->gVal > n2->gVal;
+    return n1->fVal > n2->fVal;
 };
 
 struct MultiDimMap
@@ -873,9 +874,6 @@ unordered_set<set<GroundedCondition, CustomGC>, NodeHasher, NodeComparator> clos
 // action_map maps states/preconditions to possible pair of (effects, grounded action)
 // ordered set because Node has an ordered set. can use its member directly as a key
 MultiDimMap action_map;
-// unordered_map<set<GroundedCondition, CustomGC>,
-//                 vector<pair<unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator>, GroundedAction> >,
-//                 ActionMapHasher, ActionMapComparator> action_map;
 
 void generateCombos(const vector<string>& sym, int start, int k, vector<string>& curr, vector<vector<string> >& combos)
 {
@@ -1084,6 +1082,19 @@ bool isGoal(
     return true;
 }
 
+int computeHeuristic(
+        set<GroundedCondition, CustomGC>& goal,
+        set<GroundedCondition, CustomGC>& child_conditions)
+{
+    int h = 0;
+    for(auto cond : goal)
+    {
+        if(child_conditions.find(cond) == child_conditions.end())
+            ++h;
+    }
+    return h;
+}
+
 list<GroundedAction> computePath(set<GroundedCondition, CustomGC>& goal)
 {
 	int cost = 1;
@@ -1135,13 +1146,14 @@ list<GroundedAction> computePath(set<GroundedCondition, CustomGC>& goal)
                 {
                     if(nodes.find(child_conditions) == nodes.end())
                     {
-                        shared_ptr<Node> newNode = make_shared<Node>(child_conditions);
+                        int h = computeHeuristic(goal, child_conditions);
+                        shared_ptr<Node> newNode = make_shared<Node>(child_conditions, h);
                         nodes[child_conditions] = newNode;
                     }
                     if(nodes[child_conditions]->gVal > (s->gVal + cost))
                     {
                         nodes[child_conditions]->gVal = s->gVal + cost;
-                        // nodeList[index]->f = nodeList[index]->cost + nodeList[index]->h;
+                        nodes[child_conditions]->fVal = nodes[child_conditions]->gVal + nodes[child_conditions]->hVal;
                         nodes[child_conditions]->parent = s;
                         nodes[child_conditions]->parent_action = grounded_action;
                         open_queue.push(nodes[child_conditions]);
@@ -1188,25 +1200,17 @@ list<GroundedAction> planner(Env* env)
     // cout << endl;
     // cout << "Start:" << endl;
 
-    // bool found;
-    // MultiDimMap* solution_vec;
-    // tie(found, solution_vec) = findInActionMap(init);
-    // cout << "Found " << found << endl;
-    // cout << "Size " << solution_vec->value.size() << endl;
-    // cout << solution_vec->value[0].second << endl;
+    int h_start = computeHeuristic(goal, init);
 
-    shared_ptr<Node> start = make_shared<Node>(init);
+    shared_ptr<Node> start = make_shared<Node>(init, h_start);
     start->gVal = 0;
+    start->fVal = start->gVal + start->hVal;
     nodes[init] = start;
     open_queue.push(start);
 
     list<GroundedAction> actions;
     actions = computePath(goal);
-
-    // blocks world example
-    // actions.push_back(GroundedAction("MoveToTable", { "A", "B" }));
-    // actions.push_back(GroundedAction("Move", { "C", "Table", "A" }));
-    // actions.push_back(GroundedAction("Move", { "B", "Table", "C" }));
+    cout << "Num of states expanded: " << closed.size() << endl;
 
     return actions;
 }
