@@ -1021,7 +1021,7 @@ void buildActionMap(
 tuple<bool, MultiDimMap*> findInActionMap(
                             const set<GroundedCondition, CustomGC>& state,
                             MultiDimMap* multimap_ptr,
-                            MultiDimMap* parent_ptr,
+                            // MultiDimMap* parent_ptr,
                             vector<MultiDimMap*>& output,
                             int n)
 {
@@ -1036,8 +1036,9 @@ tuple<bool, MultiDimMap*> findInActionMap(
         {
             // cout << "Debug: " << *cond << endl;
             MultiDimMap* next_ptr = multimap_ptr->multimap[*cond].get();
-            parent_ptr = multimap_ptr;
-            findInActionMap(state, next_ptr, parent_ptr, output, n + 1);
+            // parent_ptr = multimap_ptr;
+            findInActionMap(state, next_ptr, output, n + 1);
+            // findInActionMap(state, next_ptr, parent_ptr, output, n + 1);
             // multimap_ptr = next_ptr;
         }
     }
@@ -1127,10 +1128,11 @@ list<GroundedAction> computePath(set<GroundedCondition, CustomGC>& goal)
 
 		unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> effect;
 		GroundedAction grounded_action;
-        bool found;
-        MultiDimMap* solution_ptr;
+        // bool found;
+        // MultiDimMap* solution_ptr;
         vector<MultiDimMap*> output;
-        tie(found, solution_ptr) = findInActionMap(s->conditions, &action_map, nullptr, output, 0); // find possible actions based on current state
+        findInActionMap(s->conditions, &action_map, output, 0); // find possible actions based on current state
+        // tie(found, solution_ptr) = findInActionMap(s->conditions, &action_map, nullptr, output, 0); // find possible actions based on current state
 		// cout << output.size() << endl;
         for(MultiDimMap* solution_ptr : output)
         {
