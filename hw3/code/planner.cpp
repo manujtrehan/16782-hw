@@ -12,6 +12,7 @@
 #include <limits.h>
 #include <queue>
 #include <memory>
+#include <chrono>
 
 #define SYMBOLS 0
 #define INITIAL 1
@@ -853,7 +854,6 @@ struct ActionMapComparator
 
 static auto compare = [](const shared_ptr<Node>& n1, const shared_ptr<Node>& n2)
 {
-    // return n1->gVal > n2->gVal;
     return n1->fVal > n2->fVal;
 };
 
@@ -915,28 +915,14 @@ void buildActionMap(
         combos.clear(); // clear old combinations
         int num_args = action.get_args().size(); // number of args in the action for combinations
 
-        // cout << "Name of action: " << action.get_name() << endl;
-        // for(auto q : action.get_preconditions())
-        // {
-        //     cout << q << endl;
-        // }
-
         // generate all possible combinations of size 'num_args' from sym. stored in combos. then permute each element
         generateCombos(sym, 0, num_args, curr, combos);
-        // cout << "Combo list size: " << combos.size() << endl;
 
         // permute each element in combos
         for(vector<string> symbol_seq : combos)
         {
-            // cout << "Next Combo" << endl;
             do
             {
-                // for(auto p : symbol_seq)
-                // {
-                //     cout << p << " ";
-                // }
-                // cout << endl;
-
                 sym_map.clear(); // clear the symbol map
                 int ind = 0;
                 list<string> ga_syms; // list of actual symbols for grounded action
@@ -982,26 +968,13 @@ void buildActionMap(
                 // create the specific grounded action for action_map
                 GroundedAction ga(action.get_name(), ga_syms);
 
-                // cout << ga << endl;
-                // cout << "Preconds" << endl;
-                // for(auto m : preconds)
-                // {
-                //     cout << m << endl;
-                // }
-                // cout << "Effects" << endl;
-                // for(auto m : effects)
-                // {
-                //     cout << m << endl;
-                // }
-                // cout << "----" << endl;
-
                 // store precondition, effect and grounded action in multi layered action_map
                 MultiDimMap* multimap_ptr = &action_map; // no need to delete pointer since memory not on heap. normal ptr since not dynamically alloc
                 for(auto it = preconds.begin(); it != preconds.end(); ++it)
                 {
                     if(multimap_ptr->multimap.find(*it) == multimap_ptr->multimap.end())
                         multimap_ptr->multimap[*it] = make_shared<MultiDimMap>();
-                    // cout << *it << endl;
+
                     if(next(it) == preconds.end()) // reached end of precondition, store (effect, action) pair
                     {
                         multimap_ptr = multimap_ptr->multimap[*it].get(); // move to child node and store there
@@ -1011,22 +984,18 @@ void buildActionMap(
                     }
                     else multimap_ptr = multimap_ptr->multimap[*it].get();
                 }
-                // action_map[preconds].push_back({effects, ga});
 
             } while (next_permutation(symbol_seq.begin(), symbol_seq.end()));   
         }
     }
 }
 
-tuple<bool, MultiDimMap*> findInActionMap(
+void findInActionMap(
                             const set<GroundedCondition, CustomGC>& state,
                             MultiDimMap* multimap_ptr,
-                            // MultiDimMap* parent_ptr,
                             vector<MultiDimMap*>& output,
                             int n)
 {
-    // MultiDimMap* multimap_ptr = &action_map;
-    // MultiDimMap* parent_ptr = nullptr;
     auto cond = state.begin();
     if(n > 0) advance(cond, n);
 
@@ -1034,24 +1003,15 @@ tuple<bool, MultiDimMap*> findInActionMap(
     {
         if(multimap_ptr->multimap.find(*cond) != multimap_ptr->multimap.end())
         {
-            // cout << "Debug: " << *cond << endl;
             MultiDimMap* next_ptr = multimap_ptr->multimap[*cond].get();
-            // parent_ptr = multimap_ptr;
             findInActionMap(state, next_ptr, output, n + 1);
-            // findInActionMap(state, next_ptr, parent_ptr, output, n + 1);
-            // multimap_ptr = next_ptr;
         }
     }
-    if(multimap_ptr->value.empty())
-    {
-        return make_tuple(false, nullptr);
-    }
-    else
-    {
+
+    if(!multimap_ptr->value.empty())
         output.push_back(multimap_ptr);
-        // cout << "Returned" << endl;
-        return make_tuple(true, multimap_ptr);
-    }
+
+    return;
 }
 
 void addEffectToState(
@@ -1101,14 +1061,8 @@ list<GroundedAction> computePath(set<GroundedCondition, CustomGC>& goal)
 	int cost = 1;
 	while(!open_queue.empty())
 	{
-        // cout << "Open queue size: " << open_queue.size() << endl;
 		shared_ptr<Node> s = open_queue.top();
 		open_queue.pop();
-        // cout << "Current state:" << endl;
-        // for(auto i : s->conditions)
-        // {
-        //     cout << i << endl;
-        // }
 
 		if(closed.find(s->conditions) != closed.end()) continue; // skip if already visited
 		closed.insert(s->conditions); // add to closed list
@@ -1128,18 +1082,15 @@ list<GroundedAction> computePath(set<GroundedCondition, CustomGC>& goal)
 
 		unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> effect;
 		GroundedAction grounded_action;
-        // bool found;
-        // MultiDimMap* solution_ptr;
+
         vector<MultiDimMap*> output;
         findInActionMap(s->conditions, &action_map, output, 0); // find possible actions based on current state
-        // tie(found, solution_ptr) = findInActionMap(s->conditions, &action_map, nullptr, output, 0); // find possible actions based on current state
-		// cout << output.size() << endl;
+
         for(MultiDimMap* solution_ptr : output)
         {
             for(auto effect_action_pair : solution_ptr->value)
             {
                 tie(effect, grounded_action) = effect_action_pair;
-                // cout << "Next action: " << grounded_action << endl;
                 set<GroundedCondition, CustomGC> child_conditions = s->conditions; // copy parent conditions to child
                 // add effects to child conditions
                 addEffectToState(child_conditions, effect);
@@ -1150,6 +1101,7 @@ list<GroundedAction> computePath(set<GroundedCondition, CustomGC>& goal)
                     {
                         int h = computeHeuristic(goal, child_conditions);
                         shared_ptr<Node> newNode = make_shared<Node>(child_conditions, h);
+                        // shared_ptr<Node> newNode = make_shared<Node>(child_conditions, 0);
                         nodes[child_conditions] = newNode;
                     }
                     if(nodes[child_conditions]->gVal > (s->gVal + cost))
@@ -1163,8 +1115,6 @@ list<GroundedAction> computePath(set<GroundedCondition, CustomGC>& goal)
                 }
             }
         }
-        // break;
-        // cout << endl;
 	}
 
 	return list<GroundedAction>{};
@@ -1185,6 +1135,7 @@ set<GroundedCondition, CustomGC> unorderedToOrderedGC(
 list<GroundedAction> planner(Env* env)
 {
     // this is where you insert your planner
+    chrono::steady_clock::time_point begin = chrono::steady_clock::now();
 
     // get and order init and goal conditions to compare
     set<GroundedCondition, CustomGC> init, goal;
@@ -1195,16 +1146,9 @@ list<GroundedAction> planner(Env* env)
     unordered_set<string> all_symbols = env->get_symbols();
     buildActionMap(all_actions, all_symbols);
 
-    // for(auto i : init)
-    // {
-    //     cout << i << endl;
-    // }
-    // cout << endl;
-    // cout << "Start:" << endl;
-
     int h_start = computeHeuristic(goal, init);
-
     shared_ptr<Node> start = make_shared<Node>(init, h_start);
+    // shared_ptr<Node> start = make_shared<Node>(init, 0);
     start->gVal = 0;
     start->fVal = start->gVal + start->hVal;
     nodes[init] = start;
@@ -1212,7 +1156,11 @@ list<GroundedAction> planner(Env* env)
 
     list<GroundedAction> actions;
     actions = computePath(goal);
-    cout << "Num of states expanded: " << closed.size() << endl;
+
+    chrono::steady_clock::time_point end = chrono::steady_clock::now();
+
+    cout << endl << "Num of states expanded: " << closed.size() << endl;
+    cout << "Time to plan = " << chrono::duration_cast<chrono::milliseconds>(end - begin).count() << " ms" << endl;
 
     return actions;
 }
@@ -1227,7 +1175,7 @@ list<GroundedAction> planner(Env* env)
 int main(int argc, char* argv[])
 {
     // DO NOT CHANGE THIS FUNCTION
-    char* filename = (char*)("Blocks.txt");
+    char* filename = (char*)("example.txt");
     if (argc > 1)
         filename = argv[1];
 
